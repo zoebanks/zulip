@@ -662,24 +662,6 @@ export function do_populate_profile_fields(profile_fields_data) {
 
     $profile_fields_table.find("tr.profile-field-row").remove(); // Clear all rows.
     $profile_fields_table.find("tr.profile-field-form").remove(); // Clear all rows.
-    // Add no-fields-message at initialization
-
-    // $profile_fields_table.append(
-    //     '<tr><td colspan="6" class="no-fields-message">' +
-    //         'No custom profile fields configured.</td></tr>',
-    // );
-
-    $("<tr>")
-        .append(
-            $("<td>")
-                .attr({
-                    colspan: 6,
-                    class: "no-fields-message",
-                })
-                .text("No custom profile fields configured."),
-        )
-        .appendTo($profile_fields_table);
-
     order = [];
 
     let display_in_profile_summary_fields_count = 0;
@@ -724,14 +706,6 @@ export function do_populate_profile_fields(profile_fields_data) {
 
     // Update whether we're at the limit for display_in_profile_summary.
     display_in_profile_summary_fields_limit_reached = display_in_profile_summary_fields_count >= 2;
-
-    // CHANGED: Delete no-fields-message if profile_fields_data has elements in it
-    if (
-        profile_fields_data.length !== 0 &&
-        $profile_fields_table.find(".no-fields-message").length > 0
-    ) {
-        $profile_fields_table.find(".no-fields-message").remove();
-    }
 
     if (current_user.is_admin) {
         const field_list = $("#admin_profile_fields_table")[0];
