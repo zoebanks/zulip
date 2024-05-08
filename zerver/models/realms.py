@@ -167,6 +167,7 @@ class Realm(models.Model):  # type: ignore[django-manager-missing] # django-stub
 
     mandatory_topics = models.BooleanField(default=False)
 
+    require_unique_names = models.BooleanField(default=False)
     name_changes_disabled = models.BooleanField(default=False)
     email_changes_disabled = models.BooleanField(default=False)
     avatar_changes_disabled = models.BooleanField(default=False)
@@ -334,7 +335,7 @@ class Realm(models.Model):  # type: ignore[django-manager-missing] # django-stub
 
     DEFAULT_NOTIFICATION_STREAM_NAME = "general"
     INITIAL_PRIVATE_STREAM_NAME = "core team"
-    STREAM_EVENTS_NOTIFICATION_TOPIC_NAME = gettext_lazy("stream events")
+    STREAM_EVENTS_NOTIFICATION_TOPIC_NAME = gettext_lazy("channel events")
     new_stream_announcements_stream = models.ForeignKey(
         "Stream",
         related_name="+",
@@ -509,10 +510,9 @@ class Realm(models.Model):  # type: ignore[django-manager-missing] # django-stub
         BOT_CREATION_ADMINS_ONLY,
     ]
 
-    # See upload_quota_bytes; don't interpret upload_quota_gb directly.
     UPLOAD_QUOTA_LIMITED = 5
-    UPLOAD_QUOTA_STANDARD = 50
-    upload_quota_gb = models.IntegerField(null=True)
+    UPLOAD_QUOTA_STANDARD_FREE = 50
+    custom_upload_quota_gb = models.IntegerField(null=True)
 
     VIDEO_CHAT_PROVIDERS = {
         "disabled": {
@@ -627,6 +627,7 @@ class Realm(models.Model):  # type: ignore[django-manager-missing] # django-stub
         name_changes_disabled=bool,
         private_message_policy=int,
         push_notifications_enabled=bool,
+        require_unique_names=bool,
         send_welcome_emails=bool,
         user_group_edit_policy=int,
         video_chat_provider=int,
@@ -828,6 +829,34 @@ class Realm(models.Model):  # type: ignore[django-manager-missing] # django-stub
     def max_invites(self, value: Optional[int]) -> None:
         self._max_invites = value
 
+    @property
+    def upload_quota_gb(self) -> Optional[int]:
+        # See upload_quota_bytes; don't interpret upload_quota_gb directly.
+
+        if self.custom_upload_quota_gb is not None:
+            return self.custom_upload_quota_gb
+
+        if not settings.CORPORATE_ENABLED:
+            return None
+
+        plan_type = self.plan_type
+        if plan_type == Realm.PLAN_TYPE_SELF_HOSTED:  # nocoverage
+            return None
+        if plan_type == Realm.PLAN_TYPE_LIMITED:
+            return Realm.UPLOAD_QUOTA_LIMITED
+        elif plan_type == Realm.PLAN_TYPE_STANDARD_FREE:
+            return Realm.UPLOAD_QUOTA_STANDARD_FREE
+        elif plan_type in [Realm.PLAN_TYPE_STANDARD, Realm.PLAN_TYPE_PLUS]:
+            from corporate.lib.stripe import get_cached_seat_count
+
+            # Paying customers with few users should get a reasonable minimum quota.
+            return max(
+                get_cached_seat_count(self) * settings.UPLOAD_QUOTA_PER_USER_GB,
+                Realm.UPLOAD_QUOTA_STANDARD_FREE,
+            )
+        else:
+            raise AssertionError("Invalid plan type")
+
     def upload_quota_bytes(self) -> Optional[int]:
         if self.upload_quota_gb is None:
             return None
@@ -962,6 +991,13 @@ def get_realm(string_id: str) -> Realm:
 
 def get_realm_by_id(realm_id: int) -> Realm:
     return Realm.objects.get(id=realm_id)
+
+
+def require_unique_names(realm: Optional[Realm]) -> bool:
+    if realm is None:
+        # realm is None when a new realm is being created.
+        return False
+    return realm.require_unique_names
 
 
 def name_changes_disabled(realm: Optional[Realm]) -> bool:

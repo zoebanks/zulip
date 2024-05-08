@@ -4,6 +4,7 @@ import assert from "minimalistic-assert";
 import render_message_view_header from "../templates/message_view_header.hbs";
 
 import type {Filter} from "./filter";
+import * as hash_util from "./hash_util";
 import {$t} from "./i18n";
 import * as inbox_util from "./inbox_util";
 import * as narrow_state from "./narrow_state";
@@ -49,7 +50,7 @@ function get_message_view_header_context(filter: Filter | undefined): MessageVie
     }
     if (filter === undefined) {
         return {
-            title: $t({defaultMessage: "All messages"}),
+            title: $t({defaultMessage: "Combined feed"}),
             zulip_icon: "all-messages",
         };
     }
@@ -59,13 +60,13 @@ function get_message_view_header_context(filter: Filter | undefined): MessageVie
         title,
         is_spectator: page_params.is_spectator,
     });
-    if (filter.has_operator("stream") && !filter._sub) {
+    if (filter.has_operator("channel") && !filter._sub) {
         return {
             ...icon_data,
             sub_count: "0",
             formatted_sub_count: "0",
             rendered_narrow_description: $t({
-                defaultMessage: "This stream does not exist or is private.",
+                defaultMessage: "This channel does not exist or is private.",
             }),
         };
     }
@@ -81,8 +82,7 @@ function get_message_view_header_context(filter: Filter | undefined): MessageVie
             rendered_narrow_description: current_stream.rendered_description,
             sub_count,
             stream: current_stream,
-            stream_settings_link:
-                "#streams/" + current_stream.stream_id + "/" + current_stream.name + "/general",
+            stream_settings_link: hash_util.channels_settings_edit_url(current_stream, "general"),
         };
     }
     return icon_data;
@@ -99,9 +99,7 @@ export function colorize_message_view_header(): void {
 
 function append_and_display_title_area(context: MessageViewHeaderContext): void {
     const $message_view_header_elem = $("#message_view_header");
-    $message_view_header_elem.empty();
-    const rendered = render_message_view_header(context);
-    $message_view_header_elem.append(rendered);
+    $message_view_header_elem.html(render_message_view_header(context));
     if (context.stream_settings_link) {
         colorize_message_view_header();
     }

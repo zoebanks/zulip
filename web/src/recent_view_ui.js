@@ -403,14 +403,7 @@ export function hide_loading_indicator() {
 }
 
 export function process_messages(messages, msg_list_data) {
-    // This code path processes messages from 3 sources:
-    // 1. Newly sent messages from the server_events system. This is safe to
-    //    process because we always will have the latest previously sent messages.
-    // 2. Messages in all_messages_data, the main cache of contiguous
-    //    message history that the client maintains.
-    // 3. Latest messages fetched specifically for Recent view when
-    //    the browser first loads. We will be able to remove this once
-    //    all_messages_data is fetched in a better order.
+    // Always synced with messages in all_messages_data.
 
     let conversation_data_updated = false;
     if (messages.length > 0) {
@@ -1548,6 +1541,10 @@ export function initialize({
     });
 
     $("body").on("click", "td.recent_topic_stream", (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            return;
+        }
+
         e.stopPropagation();
         const topic_row_index = $(e.target).closest("tr").index();
         focus_clicked_element(topic_row_index, COLUMNS.stream);
@@ -1555,6 +1552,10 @@ export function initialize({
     });
 
     $("body").on("click", "td.recent_topic_name", (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            return;
+        }
+
         e.stopPropagation();
         // The element's parent may re-render while it is being passed to
         // other functions, so, we get topic_key first.

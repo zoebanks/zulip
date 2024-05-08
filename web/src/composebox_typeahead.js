@@ -4,7 +4,7 @@ import _ from "lodash";
 import * as typeahead from "../shared/src/typeahead";
 import render_topic_typeahead_hint from "../templates/topic_typeahead_hint.hbs";
 
-import * as bootstrap_typeahead from "./bootstrap_typeahead";
+import {Typeahead} from "./bootstrap_typeahead";
 import * as bulleted_numbered_list_util from "./bulleted_numbered_list_util";
 import * as compose_pm_pill from "./compose_pm_pill";
 import * as compose_state from "./compose_state";
@@ -65,9 +65,9 @@ export function get_or_set_completing_for_tests(val) {
     return completing;
 }
 
-export function update_emoji_data() {
+export function update_emoji_data(initial_emojis) {
     emoji_collection = [];
-    for (const emoji_dict of emoji.emojis_by_name.values()) {
+    for (const emoji_dict of initial_emojis) {
         const {reaction_type} = emoji.get_emoji_details_by_name(emoji_dict.name);
         if (emoji_dict.is_realm_emoji === true) {
             emoji_collection.push({
@@ -106,24 +106,12 @@ function get_language_matcher(query) {
     };
 }
 
-export function query_matches_person(query, person) {
-    return (
-        typeahead.query_matches_string_in_order(query, person.full_name, " ") ||
-        (Boolean(person.delivery_email) &&
-            typeahead.query_matches_string_in_order(query, people.get_visible_email(person), " "))
-    );
-}
-
-export function query_matches_name(query, user_group_or_stream) {
-    return typeahead.query_matches_string_in_order(query, user_group_or_stream.name, " ");
-}
-
 function get_stream_or_user_group_matcher(query) {
     // Case-insensitive.
     query = typeahead.clean_query_lowercase(query);
 
     return function (user_group_or_stream) {
-        return query_matches_name(query, user_group_or_stream);
+        return typeahead_helper.query_matches_name(query, user_group_or_stream);
     };
 }
 
@@ -403,7 +391,7 @@ function get_wildcard_string(mention) {
     if (mention === "topic") {
         return $t({defaultMessage: "Notify topic"});
     }
-    return $t({defaultMessage: "Notify stream"});
+    return $t({defaultMessage: "Notify channel"});
 }
 
 export function broadcast_mentions() {
@@ -411,7 +399,9 @@ export function broadcast_mentions() {
     if (compose_state.get_message_type() === "private") {
         wildcard_mention_array = ["all", "everyone"];
     } else if (compose_validate.stream_wildcard_mention_allowed()) {
-        wildcard_mention_array = ["all", "everyone", "stream", "topic"];
+        // TODO: Eventually remove "stream" wildcard from typeahead suggestions
+        // once the rename of stream to channel has settled for users.
+        wildcard_mention_array = ["all", "everyone", "stream", "channel", "topic"];
     } else if (compose_validate.topic_wildcard_mention_allowed()) {
         wildcard_mention_array = ["topic"];
     }
@@ -439,12 +429,12 @@ function filter_mention_name(current_token) {
         current_token = current_token.slice(1);
     }
     if (current_token.lastIndexOf("*") !== -1) {
-        return false;
+        return undefined;
     }
 
     // Don't autocomplete if there is a space following an '@'
-    if (current_token[0] === " ") {
-        return false;
+    if (current_token.startsWith(" ")) {
+        return undefined;
     }
     return current_token;
 }
@@ -489,6 +479,7 @@ export const slash_commands = [
         text: $t({defaultMessage: "/todo (Create a collaborative to-do list)"}),
         name: "todo",
         aliases: "",
+        placeholder: $t({defaultMessage: "Task list"}),
     },
 ];
 
@@ -532,8 +523,16 @@ export function get_person_suggestions(query, opts) {
         if (opts.want_broadcast) {
             persons = [...persons, ...broadcast_mentions()];
         }
+        // `sort_recipients` and other functions like `user_pill.get_user_ids`
+        // are shared with the pill typeahead which has only users, and we
+        // need a way to differentiate these mentons-or-users from just users,
+        // to help with typing.
+        const person_items = persons.map((person) => ({
+            ...person,
+            type: "user_or_mention",
+        }));
 
-        return persons.filter((item) => query_matches_person(query, item));
+        return person_items.filter((item) => typeahead_helper.query_matches_person(query, item));
     }
 
     let groups;
@@ -554,7 +553,9 @@ export function get_person_suggestions(query, opts) {
         groups = user_groups.get_realm_user_groups();
     }
 
-    const filtered_groups = groups.filter((item) => query_matches_name(query, item));
+    const filtered_groups = groups.filter((item) =>
+        typeahead_helper.query_matches_name(query, item),
+    );
 
     /*
         Let's say you're on a big realm and type
@@ -644,7 +645,7 @@ export function get_sorted_filtered_items(query, input_element) {
     const big_results = get_candidates(query, input_element);
 
     if (!big_results) {
-        return false;
+        return [];
     }
 
     const opts = get_stream_topic_data(input_element);
@@ -713,7 +714,7 @@ export function get_candidates(query, input_element) {
         }
 
         // Trim the first whitespace if it is there
-        if (current_token[0] === " ") {
+        if (current_token.startsWith(" ")) {
             current_token = current_token.slice(1);
         }
         completing = "syntax";
@@ -729,7 +730,7 @@ export function get_candidates(query, input_element) {
 
     // Only start the emoji autocompleter if : is directly after one
     // of the whitespace or punctuation chars we split on.
-    if (ALLOWED_MARKDOWN_FEATURES.emoji && current_token[0] === ":") {
+    if (ALLOWED_MARKDOWN_FEATURES.emoji && current_token.startsWith(":")) {
         // We don't want to match non-emoji emoticons such
         // as :P or :-p
         // Also, if the user has only typed a colon and nothing after,
@@ -746,7 +747,7 @@ export function get_candidates(query, input_element) {
         return emoji_collection;
     }
 
-    if (ALLOWED_MARKDOWN_FEATURES.mention && current_token[0] === "@") {
+    if (ALLOWED_MARKDOWN_FEATURES.mention && current_token.startsWith("@")) {
         current_token = current_token.slice(1);
         completing = "mention";
         // Silent mentions
@@ -757,7 +758,7 @@ export function get_candidates(query, input_element) {
             current_token = current_token.slice(1);
         }
         current_token = filter_mention_name(current_token);
-        if (!current_token && typeof current_token === "boolean") {
+        if (current_token === undefined) {
             completing = null;
             return false;
         }
@@ -770,7 +771,7 @@ export function get_candidates(query, input_element) {
         return commands;
     }
 
-    if (ALLOWED_MARKDOWN_FEATURES.slash && current_token[0] === "/") {
+    if (ALLOWED_MARKDOWN_FEATURES.slash && current_token.startsWith("/")) {
         current_token = current_token.slice(1);
 
         completing = "slash";
@@ -778,7 +779,7 @@ export function get_candidates(query, input_element) {
         return get_slash_commands_data();
     }
 
-    if (ALLOWED_MARKDOWN_FEATURES.stream && current_token[0] === "#") {
+    if (ALLOWED_MARKDOWN_FEATURES.stream && current_token.startsWith("#")) {
         if (current_token.length === 1) {
             return false;
         }
@@ -789,7 +790,7 @@ export function get_candidates(query, input_element) {
         }
 
         // Don't autocomplete if there is a space following a '#'
-        if (current_token[0] === " ") {
+        if (current_token.startsWith(" ")) {
             return false;
         }
 
@@ -821,7 +822,7 @@ export function get_candidates(query, input_element) {
                 token = tokens[2] || "";
 
                 // Don't autocomplete if there is a space following '>'
-                if (token[0] === " ") {
+                if (token.startsWith(" ")) {
                     return false;
                 }
 
@@ -1014,7 +1015,7 @@ export function content_typeahead_selected(item, query, input_element, event) {
                     rest = rest.slice(1);
                 }
                 $textbox.val(beginning + rest);
-                $textbox.caret(beginning.length, beginning.length);
+                $textbox.caret(beginning.length);
                 compose_ui.autosize_textarea($textbox);
             };
             flatpickr.show_flatpickr(input_element.$element[0], on_timestamp_selection, timestamp);
@@ -1030,7 +1031,7 @@ export function content_typeahead_selected(item, query, input_element, event) {
         if (highlight.start && highlight.end) {
             $textbox.range(highlight.start, highlight.end);
         } else {
-            $textbox.caret(beginning.length, beginning.length);
+            $textbox.caret(beginning.length);
         }
         // Also, trigger autosize to check if compose box needs to be resized.
         compose_ui.autosize_textarea($textbox);
@@ -1107,7 +1108,7 @@ export function initialize_topic_edit_typeahead(form_field, stream_name, dropup)
         $element: form_field,
         type: "input",
     };
-    const options = {
+    return new Typeahead(bootstrap_typeahead_input, {
         fixed: true,
         dropup,
         highlighter_html(item) {
@@ -1125,8 +1126,7 @@ export function initialize_topic_edit_typeahead(form_field, stream_name, dropup)
             return topics_seen_for(stream_id);
         },
         items: 5,
-    };
-    bootstrap_typeahead.create(bootstrap_typeahead_input, options);
+    });
 }
 
 function get_header_html() {
@@ -1156,9 +1156,9 @@ function get_header_html() {
 export function initialize_compose_typeahead(selector) {
     const bootstrap_typeahead_input = {
         $element: $(selector),
-        type: "input",
+        type: "textarea",
     };
-    bootstrap_typeahead.create(bootstrap_typeahead_input, {
+    new Typeahead(bootstrap_typeahead_input, {
         items: max_num_items,
         dropup: true,
         fixed: true,
@@ -1183,8 +1183,6 @@ export function initialize_compose_typeahead(selector) {
 }
 
 export function initialize({on_enter_send}) {
-    update_emoji_data();
-
     // These handlers are at the "form" level so that they are called after typeahead
     $("form#send_message_form").on("keydown", (e) => handle_keydown(e, {on_enter_send}));
     $("form#send_message_form").on("keyup", handle_keyup);
@@ -1193,7 +1191,7 @@ export function initialize({on_enter_send}) {
         $element: $("input#stream_message_recipient_topic"),
         type: "input",
     };
-    bootstrap_typeahead.create(stream_message_typeahead_input, {
+    new Typeahead(stream_message_typeahead_input, {
         source() {
             return topics_seen_for(compose_state.stream_id());
         },
@@ -1222,7 +1220,7 @@ export function initialize({on_enter_send}) {
         $element: $("#private_message_recipient"),
         type: "contenteditable",
     };
-    bootstrap_typeahead.create(private_message_typeahead_input, {
+    new Typeahead(private_message_typeahead_input, {
         source: get_pm_people,
         items: max_num_items,
         dropup: true,

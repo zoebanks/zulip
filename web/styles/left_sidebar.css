@@ -305,15 +305,10 @@ li.show-more-topics {
 
         & li#show-more-direct-messages {
             cursor: pointer;
-            padding-right: 26px;
-            /* TODO: Rewrite the show-more and show-less
-               buttons as grids alongside the left sidebar
-               header rewrites. This padding value
-               is a stopgap to provide the same lefthand
-               alignment as the "more topics" text, which
-               aligns with the topic above--just as this
-               aligns with the DM row above. */
-            padding-left: 29px;
+            /* The 'more conversations' line has no icons,
+               so vertically align the text with the unread
+               count, when one appears there. */
+            align-items: baseline;
 
             & a {
                 font-size: 12px;
@@ -415,9 +410,20 @@ li.show-more-topics {
     }
 }
 
-#login-link-container .login_button {
+#login-link-container {
+    color: var(--color-text-url);
     display: flex;
     align-items: center;
+
+    &:hover {
+        cursor: pointer;
+        color: var(--color-text-url-hover);
+
+        &.login_button .login-text {
+            color: var(--color-text-url-hover);
+            text-decoration: underline;
+        }
+    }
 }
 
 ul.filters {
@@ -1100,6 +1106,10 @@ li.topic-list-item {
         place-self: center;
     }
 
+    .dm-name {
+        grid-area: row-content;
+    }
+
     .user_circle {
         width: 8px;
         height: 8px;
@@ -1425,7 +1435,7 @@ li.topic-list-item {
             /* TODO: Rewrite the show-more and show-less
                buttons as grids alongside the left sidebar
                header rewrites. The 12px left padding here
-               aligns the "back to streams" text with the
+               aligns the "back to channels" text with the
                DIRECT MESSAGES heading above, which itself
                is offset -3 px to the left, but reserves
                15px for the arrow marker. 15px - 3px = 12px. */

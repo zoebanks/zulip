@@ -313,7 +313,9 @@ export class MessageListView {
     _RENDER_THRESHOLD = 50;
 
     _add_message_list_to_DOM() {
-        $("#message-lists-container").append(render_message_list({message_list_id: this.list.id}));
+        $("#message-lists-container").append(
+            $(render_message_list({message_list_id: this.list.id})),
+        );
     }
 
     _get_msg_timestring(message_container) {
@@ -376,6 +378,10 @@ export class MessageListView {
         message_container.last_edit_timestr = last_edit_timestr;
         message_container.moved = edit_history_details.moved && !edit_history_details.edited;
         message_container.modified = true;
+    }
+
+    is_current_message_list() {
+        return this.list === message_lists.current;
     }
 
     set_calculated_message_container_variables(message_container, is_revealed) {
@@ -471,7 +477,7 @@ export class MessageListView {
         // we can infer that whenever the historical flag flips
         // between adjacent messages, the current user must have
         // (un)subscribed in between those messages.
-        if (!this.list.data.filter.has_operator("stream")) {
+        if (!this.list.data.filter.has_operator("channel")) {
             return;
         }
         if (last_msg_container === undefined) {
@@ -745,7 +751,7 @@ export class MessageListView {
             $message_rows.find(".message_inline_image img").on("error", (e) => {
                 $(e.target)
                     .closest(".message_inline_image")
-                    .replaceWith(render_login_to_view_image_button());
+                    .replaceWith($(render_login_to_view_image_button()));
             });
         }
     }
@@ -1005,13 +1011,17 @@ export class MessageListView {
         }
 
         if (list === message_lists.current && messages_are_new) {
+            let sent_by_me = false;
+            if (messages.some((message) => message.sent_by_me)) {
+                sent_by_me = true;
+            }
             if (started_scrolled_up) {
                 return {
                     need_user_to_scroll: true,
                 };
             }
             const new_messages_height = this._new_messages_height(new_dom_elements);
-            const need_user_to_scroll = this._maybe_autoscroll(new_messages_height);
+            const need_user_to_scroll = this._maybe_autoscroll(new_messages_height, sent_by_me);
 
             if (need_user_to_scroll) {
                 return {
@@ -1055,10 +1065,11 @@ export class MessageListView {
         return scroll_limit;
     }
 
-    _maybe_autoscroll(new_messages_height) {
+    _maybe_autoscroll(new_messages_height, sent_by_me) {
         // If we are near the bottom of our feed (the bottom is visible) and can
         // scroll up without moving the pointer out of the viewport, do so, by
-        // up to the amount taken up by the new message.
+        // up to the amount taken up by the new message. For messages sent by
+        // the current user, we scroll it into view.
         //
         // returns `true` if we need the user to scroll
 
@@ -1090,6 +1101,13 @@ export class MessageListView {
             // If a popover is active, then we are pretty sure the
             // incoming message is not from the user themselves, so
             // we don't need to tell users to scroll down.
+            return false;
+        }
+
+        if (sent_by_me) {
+            // For messages sent by the current user we always autoscroll,
+            // updating the selected row if needed.
+            message_viewport.system_initiated_animate_scroll(new_messages_height, true);
             return false;
         }
 
@@ -1173,6 +1191,30 @@ export class MessageListView {
         return true;
     }
 
+    should_fetch_older_messages() {
+        const selected_idx = this.list.selected_idx();
+        // We fetch older messages when the user is near the top of the
+        // rendered message feed and there are older messages to fetch.
+        return (
+            // Make sure we have no cached message left to render.
+            this._render_win_start === 0 &&
+            selected_idx - this._render_win_start < this._RENDER_THRESHOLD &&
+            !this.list.data.fetch_status.has_found_oldest()
+        );
+    }
+
+    should_fetch_newer_messages() {
+        const selected_idx = this.list.selected_idx();
+        // We fetch new messages when the user is near the bottom of the
+        // rendered message feed and there are newer messages to fetch.
+        return (
+            // Make sure we have no cached message left to render.
+            this._render_win_end === this.list.num_items() &&
+            this._render_win_end - selected_idx <= this._RENDER_THRESHOLD &&
+            !this.list.data.fetch_status.has_found_newest()
+        );
+    }
+
     maybe_rerender() {
         const selected_idx = this.list.selected_idx();
 
@@ -1251,12 +1293,11 @@ export class MessageListView {
     }
 
     _find_message_group(message_group_id) {
-        // Ideally, we'd maintain this data structure with a hash
-        // table or at least a pointer from the message containers (in
-        // either case, updating the data structure when message
-        // groups are merged etc.), but we only call this from flows
-        // like message editing, so it's not a big performance
-        // problem.
+        // Finds the message group with a given message group ID.
+        //
+        // This function does a linear search, so be careful to avoid
+        // calling it in a loop. If you need that, we'll need to add a
+        // hash table to make this O(1) runtime.
         return this._message_groups.find(
             // Since we don't have a way to get a message group from
             // the containing message container, we just do a search
@@ -1580,8 +1621,22 @@ export class MessageListView {
             /* No headers are present */
             return;
         }
-        /* Intentionally remove sticky headers class here to make calculations simpler. */
-        $(".sticky_header").removeClass("sticky_header");
+
+        const $current_sticky_header = $(".sticky_header");
+        if ($current_sticky_header.length === 1) {
+            // Reset the date on the header in case we changed it.
+            const message_group_id = rows
+                .get_message_recipient_row($current_sticky_header)
+                .attr("id");
+            const group = this._find_message_group(message_group_id);
+            if (group !== undefined) {
+                const rendered_date = group.date;
+                $current_sticky_header.find(".recipient_row_date").html(rendered_date);
+                /* Intentionally remove sticky headers class here to make calculations simpler. */
+            }
+            $current_sticky_header.removeClass("sticky_header");
+        }
+
         /* visible_top is navbar top position + height for us. */
         const visible_top = message_viewport.message_viewport_info().visible_top;
         /* We need date to be properly visible on the header, so partially visible headers

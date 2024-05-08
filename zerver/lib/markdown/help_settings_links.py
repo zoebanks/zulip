@@ -69,10 +69,10 @@ link_mapping = {
         "Bots",
         "/#organization/bot-list-admin",
     ],
-    "default-streams-list": [
+    "default-channels-list": [
         "Organization settings",
-        "Default streams",
-        "/#organization/default-streams-list",
+        "Default channels",
+        "/#organization/default-channels-list",
     ],
     "linkifier-settings": [
         "Organization settings",
@@ -102,7 +102,7 @@ link_mapping = {
 }
 
 settings_markdown = """
-1. Click on the **gear** (<i class="fa fa-cog"></i>) icon in the upper
+1. Click on the **gear** (<i class="zulip-icon zulip-icon-gear"></i>) icon in the upper
    right corner of the web or desktop app.
 
 1. Select **{setting_type_name}**.

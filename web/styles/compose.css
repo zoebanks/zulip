@@ -204,6 +204,9 @@
 
     #compose-direct-recipient {
         flex-grow: 1;
+        display: grid;
+        grid-template-columns: 1fr;
+        align-items: stretch;
     }
 
     .message_header {
@@ -304,14 +307,16 @@
 
 #compose-limit-indicator {
     font-size: 12px;
-    color: hsl(39deg 100% 50%);
+    color: var(--color-limit-indicator);
+    width: max-content;
 
-    /* Keep the limit indicator
-       just above the send button */
+    /* Keep the limit indicator just above
+       and aligned with the send button */
     margin-top: auto;
+    padding: 3px 3px 3px 0;
 
     &.over_limit {
-        color: hsl(0deg 76% 65%);
+        color: var(--color-limit-indicator-over-limit);
         font-weight: bold;
     }
 }
@@ -752,7 +757,9 @@ textarea.new_message_textarea,
 }
 
 #compose_recipient_box {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: stretch;
     flex: 1 1 0;
     border-radius: 3px;
     background: hsl(0deg 0% 100%);
@@ -774,12 +781,7 @@ textarea.new_message_textarea,
 
     /* Styles for input in the recipient_box */
     #stream_message_recipient_topic {
-        /* Override inherited widths; flexbox will ensure
-           that it grows to fit. */
-        width: 0;
-        flex: 1 1 0;
-
-        /* Override flexbox's effective `max-content` min-width */
+        /* Override grid's effective `max-content` min-width */
         overflow: hidden;
         text-overflow: ellipsis;
 
@@ -787,6 +789,8 @@ textarea.new_message_textarea,
         outline: none;
 
         padding: 4px 6px;
+        /* Reset height to let `align-items: stretch` on the grid parent handle this. */
+        height: auto;
     }
 
     /* Styles for new conversation button in the recipient_box */
@@ -963,6 +967,7 @@ textarea.new_message_textarea,
       `align-self: center` to center only
       themselves, where necessary. */
     min-height: var(--compose-recipient-box-min-height);
+    min-width: 0;
 }
 
 .compose-control-buttons-container {
@@ -1109,14 +1114,7 @@ textarea.new_message_textarea,
 
         & button {
             pointer-events: none;
-        }
-
-        #compose-send-button {
-            background-color: hsl(0deg 0% 65%);
-        }
-
-        #send_later {
-            color: hsl(0deg 0% 65%);
+            opacity: 0.5;
         }
     }
 }
@@ -1176,7 +1174,7 @@ textarea.new_message_textarea,
         font-weight: lighter;
     }
 
-    /* This is the "Select a stream" default message */
+    /* This is the "Select a channel" default message */
     .text-warning {
         color: inherit;
     }

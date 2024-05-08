@@ -208,7 +208,7 @@ export class TopicListWidget {
 
         const replace_content = (html: string): void => {
             this.remove();
-            this.$parent_elem.append(html);
+            this.$parent_elem.append($(html));
         };
 
         const find = (): JQuery => this.$parent_elem.find(".topic-list");
@@ -339,7 +339,7 @@ export function initialize({
         "click",
         ".sidebar-topic-check, .topic-name, .topic-markers-and-controls",
         (e) => {
-            if (e.metaKey || e.ctrlKey) {
+            if (e.metaKey || e.ctrlKey || e.shiftKey) {
                 return;
             }
             if ($(e.target).closest(".show-more-topics").length > 0) {

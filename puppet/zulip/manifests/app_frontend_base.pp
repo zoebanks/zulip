@@ -118,16 +118,6 @@ class zulip::app_frontend_base {
     source  => 'puppet:///modules/zulip/nginx/zulip-include-frontend/uploads-internal.conf',
   }
 
-  file { [
-    # TODO/compatibility: Removed 2021-04 in Zulip 4.0; these lines can
-    # be removed once one must have upgraded through Zulip 4.0 or higher
-    # to get to the next release.
-    '/etc/nginx/zulip-include/uploads.route',
-    '/etc/nginx/zulip-include/app.d/thumbor.conf',
-  ]:
-    ensure => absent,
-  }
-
   # This determines whether we run queue processors multithreaded or
   # multiprocess.  Multiprocess scales much better, but requires more
   # RAM; we just auto-detect based on available system RAM.
@@ -147,7 +137,6 @@ class zulip::app_frontend_base {
     'email_mirror',
     'embed_links',
     'embedded_bots',
-    'invites',
     'email_senders',
     'missedmessage_emails',
     'missedmessage_mobile_notifications',
@@ -168,6 +157,7 @@ class zulip::app_frontend_base {
   } else {
     $uwsgi_default_processes = 3
   }
+  $mobile_notification_shards = Integer(zulipconf('application_server','mobile_notification_shards', 1))
   $tornado_ports = $zulip::tornado_sharding::tornado_ports
 
   $proxy_host = zulipconf('http_proxy', 'host', 'localhost')
@@ -218,6 +208,7 @@ class zulip::app_frontend_base {
     '/home/zulip/tornado',
     '/home/zulip/prod-static',
     '/home/zulip/deployments',
+    '/srv/zulip-locks',
     '/srv/zulip-emoji-cache',
     '/srv/zulip-uploaded-files-cache',
   ]:
@@ -255,12 +246,8 @@ class zulip::app_frontend_base {
   }
 
   # This cron job does nothing unless RATE_LIMIT_TOR_TOGETHER is enabled.
-  file { '/etc/cron.d/fetch-tor-exit-nodes':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0644',
-    source => 'puppet:///modules/zulip/cron.d/fetch-tor-exit-nodes',
+  zulip::cron { 'fetch-tor-exit-nodes':
+    minute => '17',
   }
   # This was originally added with a typo in the name.
   file { '/etc/cron.d/fetch-for-exit-nodes':

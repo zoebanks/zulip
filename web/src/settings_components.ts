@@ -1,5 +1,8 @@
 import $ from "jquery";
 import assert from "minimalistic-assert";
+import type {PopperElement, Props} from "tippy.js";
+import tippy from "tippy.js";
+import {z} from "zod";
 
 import render_compose_banner from "../templates/compose_banner/compose_banner.hbs";
 
@@ -10,9 +13,11 @@ import {$t} from "./i18n";
 import {realm_user_settings_defaults} from "./realm_user_settings_defaults";
 import * as scroll_util from "./scroll_util";
 import * as settings_config from "./settings_config";
+import type {CustomProfileField} from "./state_data";
 import {realm} from "./state_data";
 import * as stream_data from "./stream_data";
 import type {StreamSubscription} from "./sub_store";
+import type {HTMLSelectOneElement} from "./types";
 import type {UserGroup} from "./user_groups";
 import * as util from "./util";
 
@@ -60,13 +65,13 @@ export function get_sorted_options_list(
     return options_list;
 }
 
-type message_time_limit_settings =
+type MessageTimeLimitSetting =
     | "realm_message_content_edit_limit_seconds"
     | "realm_move_messages_between_streams_limit_seconds"
     | "realm_move_messages_within_stream_limit_seconds"
     | "realm_message_content_delete_limit_seconds";
 
-export function get_realm_time_limits_in_minutes(property: message_time_limit_settings): string {
+export function get_realm_time_limits_in_minutes(property: MessageTimeLimitSetting): string {
     const setting_value = realm[property];
     if (setting_value === null) {
         // This represents "Anytime" case.
@@ -96,14 +101,17 @@ export function get_property_value(
         | RealmSettingProperties
         | StreamSettingProperties
         | keyof UserGroup
+        | keyof CustomProfileField
         | RealmUserSettingDefaultProperties,
     for_realm_default_settings?: boolean,
     sub?: StreamSubscription,
     group?: UserGroup,
+    custom_profile_field?: CustomProfileField,
 ):
     | valueof<RealmSetting>
     | valueof<StreamSubscription>
     | valueof<UserGroup>
+    | valueof<CustomProfileField>
     | valueof<RealmUserSettingDefaultType> {
     if (for_realm_default_settings) {
         // realm_user_default_settings are stored in a separate object.
@@ -134,6 +142,15 @@ export function get_property_value(
     if (group) {
         // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
         return group[property_name as keyof UserGroup];
+    }
+
+    if (custom_profile_field) {
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+        const value = custom_profile_field[property_name as keyof CustomProfileField];
+        if (property_name === "display_in_profile_summary" && value === undefined) {
+            return false;
+        }
+        return value;
     }
 
     if (property_name === "realm_org_join_restrictions") {
@@ -180,6 +197,10 @@ export function extract_property_name($elem: JQuery, for_realm_default_settings?
         // We assume it's not an empty string and can contain only digits and lowercase ASCII letters,
         // this is ensured by a respective allowlist-based filter in populate_auth_methods().
         return /^id_authmethod[\da-z]+_(.*)$/.exec(elem_id)![1];
+    }
+
+    if (elem_id.startsWith("id-custom-profile-field")) {
+        return /^id_custom_profile_field_(.*)$/.exec(elem_id.replaceAll("-", "_"))![1];
     }
 
     return /^id_(.*)$/.exec(elem_id.replaceAll("-", "_"))![1];
@@ -229,9 +250,7 @@ export function change_element_block_display_property(
 
 export function is_video_chat_provider_jitsi_meet(): boolean {
     const video_chat_provider_id = Number.parseInt(
-        $<HTMLSelectElement & {type: "select-one"}>(
-            "select:not([multiple])#id_realm_video_chat_provider",
-        ).val()!,
+        $<HTMLSelectOneElement>("select:not([multiple])#id_realm_video_chat_provider").val()!,
         10,
     );
     const jitsi_meet_id = realm.realm_available_video_chat_providers.jitsi_meet.id;
@@ -265,7 +284,7 @@ function get_jitsi_server_url_setting_value(
     return JSON.stringify($custom_input_elem.val());
 }
 
-export function update_custom_value_input(property_name: message_time_limit_settings): void {
+export function update_custom_value_input(property_name: MessageTimeLimitSetting): void {
     const $dropdown_elem = $(`#id_${CSS.escape(property_name)}`);
     const custom_input_elem_id = $dropdown_elem
         .parent()
@@ -282,21 +301,22 @@ export function update_custom_value_input(property_name: message_time_limit_sett
 }
 
 export function get_time_limit_dropdown_setting_value(
-    property_name: message_time_limit_settings,
+    property_name: MessageTimeLimitSetting,
 ): string {
-    if (realm[property_name] === null) {
+    const value = realm[property_name];
+    if (value === null) {
         return "any_time";
     }
 
     const valid_limit_values = settings_config.time_limit_dropdown_values.map((x) => x.value);
-    if (valid_limit_values.includes(realm[property_name])) {
-        return realm[property_name].toString();
+    if (valid_limit_values.includes(value)) {
+        return value.toString();
     }
 
     return "custom_period";
 }
 
-export function set_time_limit_setting(property_name: message_time_limit_settings): void {
+export function set_time_limit_setting(property_name: MessageTimeLimitSetting): void {
     const dropdown_elem_val = get_time_limit_dropdown_setting_value(property_name);
     $(`#id_${CSS.escape(property_name)}`).val(dropdown_elem_val);
 
@@ -354,6 +374,97 @@ function get_message_retention_setting_value(
         return settings_config.retain_message_forever;
     }
     return check_valid_number_input(custom_input_val);
+}
+
+const select_field_data_schema = z.record(z.object({text: z.string(), order: z.string()}));
+type SelectFieldData = z.output<typeof select_field_data_schema>;
+
+function read_select_field_data_from_form(
+    $profile_field_form: JQuery,
+    old_field_data: unknown,
+): SelectFieldData {
+    const field_data: SelectFieldData = {};
+    let field_order = 1;
+
+    const old_option_value_map = new Map<string, string>();
+    if (old_field_data !== undefined) {
+        for (const [value, choice] of Object.entries(
+            select_field_data_schema.parse(old_field_data),
+        )) {
+            assert(typeof choice !== "string");
+            old_option_value_map.set(choice.text, value);
+        }
+    }
+    $profile_field_form.find("div.choice-row").each(function (this: HTMLElement) {
+        const text = $(this).find("input")[0].value;
+        if (text) {
+            let value = old_option_value_map.get(text);
+            if (value !== undefined) {
+                // Resetting the data-value in the form is
+                // important if the user removed an option string
+                // and then added it back again before saving
+                // changes.
+                $(this).attr("data-value", value);
+            } else {
+                value = $(this).attr("data-value")!;
+            }
+            field_data[value] = {text, order: field_order.toString()};
+            field_order += 1;
+        }
+    });
+
+    return field_data;
+}
+
+type ExternalAccountFieldData = {subtype: string; url_pattern?: string};
+
+function read_external_account_field_data($profile_field_form: JQuery): ExternalAccountFieldData {
+    const field_data: ExternalAccountFieldData = {
+        subtype: $profile_field_form
+            .find<HTMLSelectOneElement>("select:not([multiple])[name=external_acc_field_type]")
+            .val()!,
+    };
+    if (field_data.subtype === "custom") {
+        field_data.url_pattern = $profile_field_form
+            .find<HTMLInputElement>("input[name=url_pattern]")
+            .val()!;
+    }
+    return field_data;
+}
+
+type FieldData = SelectFieldData | ExternalAccountFieldData;
+
+export function read_field_data_from_form(
+    field_type_id: number,
+    $profile_field_form: JQuery,
+    old_field_data: unknown,
+): FieldData | undefined {
+    const field_types = realm.custom_profile_field_types;
+
+    // Only read field data if we are creating a select field
+    // or external account field.
+    if (field_type_id === field_types.SELECT.id) {
+        return read_select_field_data_from_form($profile_field_form, old_field_data);
+    } else if (field_type_id === field_types.EXTERNAL_ACCOUNT.id) {
+        return read_external_account_field_data($profile_field_form);
+    }
+    return undefined;
+}
+
+function get_field_data_input_value($input_elem: JQuery): string | undefined {
+    const $profile_field_form = $input_elem.closest(".profile-field-form");
+    const profile_field_id = Number.parseInt(
+        $($profile_field_form).attr("data-profile-field-id")!,
+        10,
+    );
+    const field = realm.custom_profile_fields.find((field) => field.id === profile_field_id)!;
+
+    const proposed_value = read_field_data_from_form(
+        field.type,
+        $profile_field_form,
+        JSON.parse(field.field_data),
+    );
+    return JSON.stringify(proposed_value);
 }
 
 export function sort_object_by_key(obj: Record<string, boolean>): Record<string, boolean> {
@@ -530,12 +641,20 @@ export function change_save_button_state($element: JQuery, state: string): void 
     assert(data_status !== undefined);
     $saveBtn.attr("data-status", data_status);
     if (state === "unsaved") {
-        // Ensure the save button is visible when the state is "unsaved",
-        // so the user does not miss saving their changes.
-        scroll_util.scroll_element_into_container(
-            $element.parent(".subsection-header"),
-            $("#settings_content"),
-        );
+        // Do not scroll if the currently focused element is a textarea or an input
+        // of type text, to not interrupt the user's typing flow. Scrolling will happen
+        // anyway when the field loses focus (via the change event) if necessary.
+        if (
+            !document.activeElement ||
+            !$(document.activeElement).is('textarea, input[type="text"]')
+        ) {
+            // Ensure the save button is visible when the state is "unsaved",
+            // so the user does not miss saving their changes.
+            scroll_util.scroll_element_into_container(
+                $element.parent(".subsection-header"),
+                $("#settings_content"),
+            );
+        }
         enable_or_disable_save_button($element.closest(".settings-subsection-parent"));
     }
     assert(is_show !== undefined);
@@ -549,19 +668,22 @@ function get_input_type($input_elem: JQuery, input_type?: string): string {
     if (input_type !== undefined && ["boolean", "string", "number"].includes(input_type)) {
         return input_type;
     }
-    return $input_elem.data("setting-widget-type");
+    input_type = $input_elem.attr("data-setting-widget-type");
+    assert(input_type !== undefined);
+    return input_type;
 }
 
 export function get_input_element_value(
     input_elem: HTMLElement,
     input_type?: string,
-): number | string | null | undefined {
+): boolean | number | string | null | undefined {
     const $input_elem = $(input_elem);
     input_type = get_input_type($input_elem, input_type);
     let input_value;
     switch (input_type) {
         case "boolean":
-            return $(input_elem).prop("checked");
+            assert(input_elem instanceof HTMLInputElement);
+            return input_elem.checked;
         case "string":
             assert(
                 input_elem instanceof HTMLInputElement ||
@@ -596,6 +718,8 @@ export function get_input_element_value(
             return get_message_retention_setting_value($(input_elem));
         case "dropdown-list-widget":
             return get_dropdown_list_widget_setting_value($input_elem);
+        case "field-data-setting":
+            return get_field_data_input_value($input_elem);
         default:
             return undefined;
     }
@@ -628,9 +752,9 @@ export function get_auth_method_list_data(): Record<string, boolean> {
     const $auth_method_rows = $("#id_realm_authentication_methods").find("div.method_row");
 
     for (const method_row of $auth_method_rows) {
-        new_auth_methods[$(method_row).data("method")] = $(method_row)
-            .find("input")
-            .prop("checked");
+        const method = $(method_row).attr("data-method");
+        assert(method !== undefined);
+        new_auth_methods[method] = $(method_row).find<HTMLInputElement>("input")[0].checked;
     }
 
     return new_auth_methods;
@@ -686,6 +810,7 @@ type setting_property_type =
     | RealmSettingProperties
     | StreamSettingProperties
     | keyof UserGroup
+    | keyof CustomProfileField
     | RealmUserSettingDefaultProperties;
 
 export function check_property_changed(
@@ -693,6 +818,7 @@ export function check_property_changed(
     for_realm_default_settings: boolean,
     sub: StreamSubscription | undefined,
     group: UserGroup | undefined,
+    custom_profile_field: CustomProfileField | undefined,
 ): boolean {
     const $elem = $(elem);
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
@@ -700,7 +826,14 @@ export function check_property_changed(
         $elem,
         for_realm_default_settings,
     ) as setting_property_type;
-    let current_val = get_property_value(property_name, for_realm_default_settings, sub, group);
+    let current_val = get_property_value(
+        property_name,
+        for_realm_default_settings,
+        sub,
+        group,
+        custom_profile_field,
+    );
+
     let proposed_val;
 
     switch (property_name) {
@@ -747,6 +880,9 @@ export function check_property_changed(
         case "stream_privacy":
             proposed_val = get_input_element_value(elem, "radio-group");
             break;
+        case "field_data":
+            proposed_val = get_input_element_value(elem, "field-data-setting");
+            break;
         default:
             if (current_val !== undefined) {
                 proposed_val = get_input_element_value(elem, typeof current_val);
@@ -783,7 +919,7 @@ export function save_discard_widget_status_handler(
     $subsection.find(".save-button").show();
     const properties_elements = get_subsection_property_elements($subsection);
     const show_change_process_button = properties_elements.some((elem) =>
-        check_property_changed(elem, for_realm_default_settings, sub, group),
+        check_property_changed(elem, for_realm_default_settings, sub, group, undefined),
     );
 
     const $save_btn_controls = $subsection.find(".subsection-header .save-button-controls");
@@ -810,14 +946,14 @@ export function save_discard_widget_status_handler(
             banner_type: compose_banner.WARNING,
             banner_text: $t({
                 defaultMessage:
-                    "Only subscribers can access or join private streams, so you will lose access to this stream if you convert it to a private stream while not subscribed to it.",
+                    "Only subscribers can access or join private channels, so you will lose access to this channel if you convert it to a private channel while not subscribed to it.",
             }),
             button_text: $t({defaultMessage: "Subscribe"}),
             classname: "stream_privacy_warning",
             stream_id: sub.stream_id,
         };
         $("#stream_permission_settings .stream-permissions-warning-banner").append(
-            render_compose_banner(context),
+            $(render_compose_banner(context)),
         );
     } else {
         $("#stream_permission_settings .stream-permissions-warning-banner").empty();
@@ -844,7 +980,7 @@ function should_disable_save_button_for_jitsi_server_url_setting(): boolean {
         return false;
     }
 
-    const $dropdown_elem = $<HTMLSelectElement & {type: "select-one"}>(
+    const $dropdown_elem = $<HTMLSelectOneElement>(
         "select:not([multiple])#id_realm_jitsi_server_url",
     );
     const $custom_input_elem = $<HTMLInputElement>("input#id_realm_jitsi_server_url_custom_input");
@@ -860,9 +996,7 @@ function should_disable_save_button_for_time_limit_settings(
 ): boolean {
     let disable_save_btn = false;
     for (const setting_elem of time_limit_settings) {
-        const $dropdown_elem = $(setting_elem).find<HTMLSelectElement & {type: "select-one"}>(
-            "select:not([multiple])",
-        );
+        const $dropdown_elem = $(setting_elem).find<HTMLSelectOneElement>("select:not([multiple])");
         const $custom_input_elem = $(setting_elem).find<HTMLInputElement>(
             "input.time-limit-custom-input",
         );
@@ -905,7 +1039,44 @@ function enable_or_disable_save_button($subsection_elem: JQuery): void {
         disable_save_btn = should_disable_save_button_for_time_limit_settings(time_limit_settings);
     } else if ($subsection_elem.attr("id") === "org-other-settings") {
         disable_save_btn = should_disable_save_button_for_jitsi_server_url_setting();
+        const $button_wrapper = $subsection_elem.find<PopperElement>(".subsection-changes-save");
+        const tippy_instance = $button_wrapper[0]._tippy;
+        if (disable_save_btn) {
+            // avoid duplication of tippy
+            if (!tippy_instance) {
+                const opts: Partial<Props> = {placement: "top"};
+                initialize_disable_btn_hint_popover(
+                    $button_wrapper,
+                    $t({defaultMessage: "Cannot save invalid Jitsi server URL."}),
+                    opts,
+                );
+            }
+        } else {
+            if (tippy_instance) {
+                tippy_instance.destroy();
+            }
+        }
     }
 
     $subsection_elem.find(".subsection-changes-save button").prop("disabled", disable_save_btn);
+}
+
+export function initialize_disable_btn_hint_popover(
+    $btn_wrapper: JQuery,
+    hint_text: string | undefined,
+    opts: Partial<Props>,
+): void {
+    const tippy_opts: Partial<Props> = {
+        animation: false,
+        hideOnClick: false,
+        placement: "bottom",
+        ...opts,
+    };
+
+    // If hint_text is undefined, we use the HTML content of a
+    // <template> whose id is given by data-tooltip-template-id
+    if (hint_text !== undefined) {
+        tippy_opts.content = hint_text;
+    }
+    tippy($btn_wrapper[0], tippy_opts);
 }

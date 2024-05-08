@@ -295,8 +295,6 @@ test_people("basics", ({override}) => {
     const email = "isaac@example.com";
 
     assert.ok(!people.is_known_user_id(32));
-    assert.ok(!people.is_known_user(isaac));
-    assert.ok(!people.is_known_user(undefined));
     assert.ok(!people.is_valid_full_name_and_user_id(full_name, 32));
     assert.equal(people.get_user_id_from_name(full_name), undefined);
 
@@ -306,7 +304,6 @@ test_people("basics", ({override}) => {
 
     assert.ok(people.is_valid_full_name_and_user_id(full_name, 32));
     assert.ok(people.is_known_user_id(32));
-    assert.ok(people.is_known_user(isaac));
     assert.equal(people.get_active_human_count(), 2);
 
     assert.equal(people.get_user_id_from_name(full_name), 32);
@@ -1150,6 +1147,13 @@ test_people("track_duplicate_full_names", () => {
 });
 
 test_people("get_mention_syntax", () => {
+    // blueslip warning is not raised for wildcard mentions without a user_id
+    assert.equal(people.get_mention_syntax("all"), "@**all**");
+    assert.equal(people.get_mention_syntax("everyone", undefined, true), "@_**everyone**");
+    assert.equal(people.get_mention_syntax("stream"), "@**channel**");
+    assert.equal(people.get_mention_syntax("channel"), "@**channel**");
+    assert.equal(people.get_mention_syntax("topic"), "@**topic**");
+
     people.add_active_user(stephen1);
     people.add_active_user(stephen2);
     people.add_active_user(maria);
@@ -1161,7 +1165,7 @@ test_people("get_mention_syntax", () => {
     blueslip.reset();
 
     assert.equal(people.get_mention_syntax("Stephen King", 601), "@**Stephen King|601**");
-    assert.equal(people.get_mention_syntax("Stephen King", 602), "@**Stephen King|602**");
+    assert.equal(people.get_mention_syntax("Stephen King", 602, true), "@_**Stephen King|602**");
     assert.equal(people.get_mention_syntax("Maria Athens", 603), "@**Maria Athens**");
 
     // Following tests handle a special case when `full_name` matches with a wildcard.
@@ -1172,7 +1176,8 @@ test_people("get_mention_syntax", () => {
     assert.equal(people.get_mention_syntax("all", 1202), "@**all|1202**");
 
     people.add_active_user(all2);
-    assert.equal(people.get_mention_syntax("all", 1203), "@**all|1203**");
+    assert.ok(people.is_duplicate_full_name("all"));
+    assert.equal(people.get_mention_syntax("all", 1203, true), "@_**all|1203**");
 });
 
 test_people("initialize", () => {
@@ -1224,7 +1229,7 @@ test_people("initialize", () => {
     assert.equal(page_params.realm_non_active_users, undefined);
 });
 
-test_people("filter_for_user_settings_search", () => {
+test_people("predicate_for_user_settings_filters", () => {
     /*
         This function calls matches_user_settings_search,
         so that is where we do more thorough testing.
@@ -1232,18 +1237,41 @@ test_people("filter_for_user_settings_search", () => {
     */
     current_user.is_admin = false;
 
-    const fred_smith = {full_name: "Fred Smith"};
-    const alice_lee = {full_name: "Alice Lee"};
-    const jenny_franklin = {full_name: "Jenny Franklin"};
+    const fred_smith = {full_name: "Fred Smith", role: 100};
 
-    const persons = [fred_smith, alice_lee, jenny_franklin];
-
-    assert.deepEqual(people.filter_for_user_settings_search(persons, "fr"), [
-        fred_smith,
-        jenny_franklin,
-    ]);
-
-    assert.deepEqual(people.filter_for_user_settings_search(persons, "le"), [alice_lee]);
+    // Test only when text_search filter is true
+    assert.equal(
+        people.predicate_for_user_settings_filters(fred_smith, {text_search: "fr", role_code: 0}),
+        true,
+    );
+    // Test only when role_code filter is true
+    assert.equal(
+        people.predicate_for_user_settings_filters(fred_smith, {text_search: "", role_code: 100}),
+        true,
+    );
+    // Test only when text_search filter is false
+    assert.equal(
+        people.predicate_for_user_settings_filters(fred_smith, {text_search: "ab", role_code: 0}),
+        false,
+    );
+    // Test only when role_code filter is false
+    assert.equal(
+        people.predicate_for_user_settings_filters(fred_smith, {text_search: "", role_code: 200}),
+        false,
+    );
+    // Test when both text_search and role_code filter are true
+    assert.equal(
+        people.predicate_for_user_settings_filters(fred_smith, {
+            text_search: "smi",
+            role_code: 100,
+        }),
+        true,
+    );
+    // Test when both text_search and role_code filter are false
+    assert.equal(
+        people.predicate_for_user_settings_filters(fred_smith, {text_search: "de", role_code: 300}),
+        false,
+    );
 });
 
 test_people("matches_user_settings_search", () => {

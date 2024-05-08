@@ -59,9 +59,9 @@
     }
 
     /************************* MODAL DARK THEME *******************/
-    .user_profile_manage_own_edit_button,
-    .user_profile_manage_others_edit_button,
-    .user_profile_manage_own_copy_link_button {
+    .user-profile-manage-own-edit-button,
+    .user-profile-manage-others-edit-button,
+    .user-profile-manage-own-copy-link-button {
         color: hsl(200deg 100% 50%);
         cursor: pointer;
 
@@ -102,12 +102,6 @@
         .enter_sends_minor {
             color: hsl(0deg 0% 80%);
         }
-    }
-
-    .modal__btn:disabled,
-    .disabled-message-send-controls button {
-        opacity: 1;
-        background-color: hsl(0deg 0% 83% / 50%);
     }
 
     & table.table-striped thead.table-sticky-headers th {
@@ -355,7 +349,7 @@
         border-color: hsl(0deg 0% 100% / 40%);
     }
 
-    .streams_popover .sp-container {
+    #stream-actions-menu-popover .sp-container {
         background-color: transparent;
 
         & button {
@@ -482,7 +476,7 @@
         background-color: hsl(0deg 86% 14%) !important;
     }
 
-    #compose-direct-recipient.pill-container {
+    #compose-direct-recipient .pill-container {
         background-color: hsl(0deg 0% 0% / 20%);
     }
 
@@ -523,10 +517,6 @@
 
     .ind-tab.disabled {
         color: hsl(0deg 0% 42% / 90%) !important;
-    }
-
-    .message_time:hover {
-        color: var(--color-message-action-interactive);
     }
 
     & input[type="text"]:focus,
@@ -814,14 +804,6 @@
         text-shadow: none;
     }
 
-    /* There is no lefthand border to cover in
-      dark mode, so don't apply negative margin
-      that would otherwise pull the unread marker
-      to the left. */
-    .unread_marker {
-        margin-left: 0;
-    }
-
     .selected_message .messagebox-content {
         border-color: hsl(217deg 64% 59% / 70%);
     }
@@ -1039,6 +1021,10 @@
         background-color: hsl(212deg 25% 15%);
         border-color: hsl(0deg 0% 0% / 50%);
         color: inherit;
+
+        & a:hover {
+            color: hsl(0deg 0% 100%);
+        }
     }
 
     /* Search highlight used in both topics and rendered_markdown */
@@ -1169,7 +1155,7 @@
         }
     }
 
-    .panel_subscriber_member_list > .pill-container {
+    .panel_user_list > .pill-container {
         &:hover {
             color: inherit;
         }

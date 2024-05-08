@@ -165,7 +165,7 @@ export const initialize = (): void => {
                 const response_data = upgrade_response_schema.parse(response);
                 if (response_data.stripe_invoice_id) {
                     window.location.replace(
-                        `${page_params.billing_base_url}/billing/event_status?stripe_invoice_id=${response_data.stripe_invoice_id}`,
+                        `${page_params.billing_base_url}/billing/event_status/?stripe_invoice_id=${response_data.stripe_invoice_id}`,
                     );
                 } else if (response_data.organization_upgrade_successful) {
                     helpers.redirect_to_billing_with_successful_upgrade(
@@ -177,7 +177,11 @@ export const initialize = (): void => {
                 $("#org-upgrade-button-text").show();
                 $("#org-upgrade-button .upgrade-button-loader").hide();
                 // Add a generic help text for card errors.
-                if (xhr.responseJSON.error_description === "card error") {
+                if (
+                    z
+                        .object({error_description: z.literal("card error")})
+                        .safeParse(xhr.responseJSON).success
+                ) {
                     const error_text = $error_box.text();
                     $error_box.text(`${error_text} Please fix this issue or use a different card.`);
                 }

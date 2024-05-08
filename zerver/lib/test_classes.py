@@ -47,6 +47,7 @@ from django.urls import resolve
 from django.utils import translation
 from django.utils.module_loading import import_string
 from django.utils.timezone import now as timezone_now
+from django_stubs_ext import ValuesQuerySet
 from fakeldap import MockLDAP
 from openapi_core.contrib.django import DjangoOpenAPIRequest, DjangoOpenAPIResponse
 from requests import PreparedRequest
@@ -66,7 +67,7 @@ from zerver.lib.initial_password import initial_password
 from zerver.lib.message import access_message
 from zerver.lib.notification_data import UserMessageNotificationsData
 from zerver.lib.per_request_cache import flush_per_request_caches
-from zerver.lib.rate_limiter import bounce_redis_key_prefix_for_testing
+from zerver.lib.redis_utils import bounce_redis_key_prefix_for_testing
 from zerver.lib.sessions import get_session_dict_user
 from zerver.lib.soft_deactivation import do_soft_deactivate_users
 from zerver.lib.stream_subscription import get_subscribed_stream_ids_for_user
@@ -98,6 +99,7 @@ from zerver.lib.webhooks.common import (
 from zerver.models import (
     Client,
     Message,
+    NamedUserGroup,
     PushDeviceToken,
     Reaction,
     Realm,
@@ -105,7 +107,6 @@ from zerver.models import (
     Recipient,
     Stream,
     Subscription,
-    UserGroup,
     UserGroupMembership,
     UserMessage,
     UserProfile,
@@ -286,7 +287,9 @@ Output:
     django_client to fool the regex.
     """
     DEFAULT_SUBDOMAIN = "zulip"
-    TOKENIZED_NOREPLY_REGEX = settings.TOKENIZED_NOREPLY_EMAIL_ADDRESS.format(token="[a-z0-9_]{24}")
+    TOKENIZED_NOREPLY_REGEX = settings.TOKENIZED_NOREPLY_EMAIL_ADDRESS.format(
+        token=r"[a-z0-9_]{24}"
+    )
 
     def set_http_headers(self, extra: Dict[str, str], skip_user_agent: bool = False) -> None:
         if "subdomain" in extra:
@@ -1245,7 +1248,7 @@ Output:
         """
         self.assertEqual(self.get_json_error(result, status_code=status_code), msg)
 
-    def assert_length(self, items: Collection[Any], count: int) -> None:
+    def assert_length(self, items: Collection[Any] | ValuesQuerySet[Any, Any], count: int) -> None:
         actual_count = len(items)
         if actual_count != count:  # nocoverage
             print("\nITEMS:\n")
@@ -1361,7 +1364,7 @@ Output:
         history_public_to_subscribers = get_default_value_for_history_public_to_subscribers(
             realm, invite_only, history_public_to_subscribers
         )
-        administrators_user_group = UserGroup.objects.get(
+        administrators_user_group = NamedUserGroup.objects.get(
             name=SystemGroups.ADMINISTRATORS, realm=realm, is_system_group=True
         )
 
@@ -1559,7 +1562,7 @@ Output:
         markdown.__init__.do_convert.
         """
         with mock.patch(
-            "zerver.lib.markdown.timeout", side_effect=subprocess.CalledProcessError(1, [])
+            "zerver.lib.markdown.unsafe_timeout", side_effect=subprocess.CalledProcessError(1, [])
         ), self.assertLogs(level="ERROR"):  # For markdown_logger.exception
             yield
 
@@ -1969,7 +1972,7 @@ Output:
         self.send_personal_message(shiva, polonius)
         self.send_huddle_message(aaron, [polonius, zoe])
 
-        members_group = UserGroup.objects.get(name="role:members", realm=realm)
+        members_group = NamedUserGroup.objects.get(name="role:members", realm=realm)
         do_change_realm_permission_group_setting(
             realm, "can_access_all_users_group", members_group, acting_user=None
         )
@@ -2077,7 +2080,7 @@ class WebhookTestCase(ZulipTestCase):
       important for ensuring we document all fully supported event types.
     """
 
-    STREAM_NAME: Optional[str] = None
+    CHANNEL_NAME: Optional[str] = None
     TEST_USER_EMAIL = "webhook-bot@zulip.com"
     URL_TEMPLATE: str
     WEBHOOK_DIR_NAME: Optional[str] = None
@@ -2145,7 +2148,7 @@ You can fix this by adding "{complete_event_type}" to ALL_EVENT_TYPES for this w
             self.patch.start()
             self.addCleanup(self.patch.stop)
 
-    def api_stream_message(
+    def api_channel_message(
         self,
         user: UserProfile,
         fixture_name: str,
@@ -2182,7 +2185,7 @@ You can fix this by adding "{complete_event_type}" to ALL_EVENT_TYPES for this w
         We use `fixture_name` to find the payload data in of our test
         fixtures.  Then we verify that a message gets sent to a stream:
 
-            self.STREAM_NAME: stream name
+            self.CHANNEL_NAME: stream name
             expected_topic_name: topic name
             expected_message: content
 
@@ -2194,8 +2197,8 @@ You can fix this by adding "{complete_event_type}" to ALL_EVENT_TYPES for this w
 
         When no message is expected to be sent, set `expect_noop` to True.
         """
-        assert self.STREAM_NAME is not None
-        self.subscribe(self.test_user, self.STREAM_NAME)
+        assert self.CHANNEL_NAME is not None
+        self.subscribe(self.test_user, self.CHANNEL_NAME)
 
         payload = self.get_payload(fixture_name)
         if content_type is not None:
@@ -2229,21 +2232,21 @@ one or more new messages.
             )
         assert expected_message is not None and expected_topic_name is not None
 
-        self.assert_stream_message(
+        self.assert_channel_message(
             message=msg,
-            stream_name=self.STREAM_NAME,
+            channel_name=self.CHANNEL_NAME,
             topic_name=expected_topic_name,
             content=expected_message,
         )
 
-    def assert_stream_message(
+    def assert_channel_message(
         self,
         message: Message,
-        stream_name: str,
+        channel_name: str,
         topic_name: str,
         content: str,
     ) -> None:
-        self.assert_message_stream_name(message, stream_name)
+        self.assert_message_stream_name(message, channel_name)
         self.assertEqual(message.topic_name(), topic_name)
         self.assertEqual(message.content, content)
 
@@ -2288,9 +2291,9 @@ one or more new messages.
         url = self.URL_TEMPLATE
         if url.find("api_key") >= 0:
             api_key = get_api_key(self.test_user)
-            url = self.URL_TEMPLATE.format(api_key=api_key, stream=self.STREAM_NAME)
+            url = self.URL_TEMPLATE.format(api_key=api_key, stream=self.CHANNEL_NAME)
         else:
-            url = self.URL_TEMPLATE.format(stream=self.STREAM_NAME)
+            url = self.URL_TEMPLATE.format(stream=self.CHANNEL_NAME)
 
         has_arguments = kwargs or args
         if has_arguments and url.find("?") == -1:
@@ -2415,7 +2418,7 @@ class BouncerTestCase(ZulipTestCase):
     def add_mock_response(self) -> None:
         # Match any endpoint with the PUSH_NOTIFICATION_BOUNCER_URL.
         assert settings.PUSH_NOTIFICATION_BOUNCER_URL is not None
-        COMPILED_URL = re.compile(settings.PUSH_NOTIFICATION_BOUNCER_URL + ".*")
+        COMPILED_URL = re.compile(settings.PUSH_NOTIFICATION_BOUNCER_URL + r".*")
         responses.add_callback(responses.POST, COMPILED_URL, callback=self.request_callback)
         responses.add_callback(responses.GET, COMPILED_URL, callback=self.request_callback)
 

@@ -207,7 +207,7 @@ function insert_dms(keys_to_insert) {
     // If we need to insert at the top, we do it separately to avoid edge case in loop below.
     if (keys_to_insert.includes(sorted_keys[0])) {
         $("#inbox-direct-messages-container").prepend(
-            render_inbox_row(dms_dict.get(sorted_keys[0])),
+            $(render_inbox_row(dms_dict.get(sorted_keys[0]))),
         );
     }
 
@@ -218,7 +218,7 @@ function insert_dms(keys_to_insert) {
 
         if (keys_to_insert.includes(key)) {
             const $previous_row = get_row_from_conversation_key(sorted_keys[i - 1]);
-            $previous_row.after(render_inbox_row(dms_dict.get(key)));
+            $previous_row.after($(render_inbox_row(dms_dict.get(key))));
         }
     }
 }
@@ -241,7 +241,7 @@ function rerender_dm_inbox_row_if_needed(new_dm_data, old_dm_data, dm_keys_to_in
     for (const property in new_dm_data) {
         if (new_dm_data[property] !== old_dm_data[property]) {
             const $rendered_row = get_row_from_conversation_key(new_dm_data.conversation_key);
-            $rendered_row.replaceWith(render_inbox_row(new_dm_data));
+            $rendered_row.replaceWith($(render_inbox_row(new_dm_data)));
             return;
         }
     }
@@ -294,7 +294,7 @@ function rerender_stream_inbox_header_if_needed(new_stream_data, old_stream_data
     for (const property in new_stream_data) {
         if (new_stream_data[property] !== old_stream_data[property]) {
             const $rendered_row = get_stream_header_row(new_stream_data.stream_id);
-            $rendered_row.replaceWith(render_inbox_row(new_stream_data));
+            $rendered_row.replaceWith($(render_inbox_row(new_stream_data)));
             return;
         }
     }
@@ -333,7 +333,7 @@ function insert_stream(stream_id, topic_dict) {
     });
 
     if (stream_index === 0) {
-        $("#inbox-streams-container").prepend(rendered_stream);
+        $("#inbox-streams-container").prepend($(rendered_stream));
     } else {
         const previous_stream_key = sorted_stream_keys[stream_index - 1];
         $(rendered_stream).insertAfter(get_stream_container(previous_stream_key));
@@ -349,7 +349,7 @@ function insert_topics(keys, stream_key) {
         const $stream = get_stream_container(stream_key);
         $stream
             .find(".inbox-topic-container")
-            .prepend(render_inbox_row(stream_topics_data.get(sorted_keys[0])));
+            .prepend($(render_inbox_row(stream_topics_data.get(sorted_keys[0]))));
     }
 
     for (const [i, key] of sorted_keys.entries()) {
@@ -359,7 +359,7 @@ function insert_topics(keys, stream_key) {
 
         if (keys.includes(key)) {
             const $previous_row = get_row_from_conversation_key(sorted_keys[i - 1]);
-            $previous_row.after(render_inbox_row(stream_topics_data.get(key)));
+            $previous_row.after($(render_inbox_row(stream_topics_data.get(key))));
         }
     }
 }
@@ -380,7 +380,7 @@ function rerender_topic_inbox_row_if_needed(new_topic_data, old_topic_data, topi
     for (const property in new_topic_data) {
         if (new_topic_data[property] !== old_topic_data[property]) {
             const $rendered_row = get_row_from_conversation_key(new_topic_data.conversation_key);
-            $rendered_row.replaceWith(render_inbox_row(new_topic_data));
+            $rendered_row.replaceWith($(render_inbox_row(new_topic_data)));
             return;
         }
     }
@@ -448,13 +448,11 @@ function reset_data() {
     topics_dict = new Map();
     streams_dict = new Map();
 
-    const include_per_bucket_max_msg_id = true;
-    const unread_dms = unread.get_unread_pm(include_per_bucket_max_msg_id);
+    const unread_dms = unread.get_unread_pm();
     const unread_dms_count = unread_dms.total_count;
     const unread_dms_dict = unread_dms.pm_dict;
 
-    const include_per_topic_max_msg_id = true;
-    const unread_stream_message = unread.get_unread_topics(include_per_topic_max_msg_id);
+    const unread_stream_message = unread.get_unread_topics();
     const unread_stream_msg_count = unread_stream_message.stream_unread_messages;
     const unread_streams_dict = unread_stream_message.topic_counts;
 
@@ -952,12 +950,15 @@ export function change_focused_element(input_key) {
         }
     } else if (is_filters_dropdown_focused()) {
         switch (input_key) {
+            case "vim_down":
             case "down_arrow":
                 set_list_focus();
                 return true;
+            case "vim_left":
             case "left_arrow":
                 focus_inbox_search();
                 return true;
+            case "vim_right":
             case "right_arrow":
             case "tab":
                 focus_inbox_search();
@@ -966,6 +967,12 @@ export function change_focused_element(input_key) {
                 // Let user focus outside inbox view.
                 current_focus_id = "";
                 return false;
+            case "escape":
+                if (get_all_rows().length === 0) {
+                    return false;
+                }
+                set_list_focus();
+                return true;
         }
     } else {
         switch (input_key) {
@@ -1014,13 +1021,11 @@ export function update() {
         return;
     }
 
-    const include_per_bucket_max_msg_id = true;
-    const unread_dms = unread.get_unread_pm(include_per_bucket_max_msg_id);
+    const unread_dms = unread.get_unread_pm();
     const unread_dms_count = unread_dms.total_count;
     const unread_dms_dict = unread_dms.pm_dict;
 
-    const include_per_topic_max_msg_id = true;
-    const unread_stream_message = unread.get_unread_topics(include_per_topic_max_msg_id);
+    const unread_stream_message = unread.get_unread_topics();
     const unread_streams_dict = unread_stream_message.topic_counts;
 
     let has_dms_post_filter = false;
@@ -1261,6 +1266,10 @@ export function initialize() {
     );
 
     $("body").on("keydown", ".inbox-header", (e) => {
+        if (e.metaKey || e.ctrlKey) {
+            return;
+        }
+
         if (keydown_util.is_enter_event(e)) {
             e.preventDefault();
             e.stopPropagation();
@@ -1280,6 +1289,10 @@ export function initialize() {
     });
 
     $("body").on("keydown", ".inbox-row", (e) => {
+        if (e.metaKey || e.ctrlKey) {
+            return;
+        }
+
         if (keydown_util.is_enter_event(e)) {
             e.preventDefault();
             e.stopPropagation();
@@ -1290,6 +1303,10 @@ export function initialize() {
     });
 
     $("body").on("click", "#inbox-list .inbox-left-part-wrapper", (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            return;
+        }
+
         const $elt = $(e.currentTarget);
         col_focus = COLUMNS.RECIPIENT;
         focus_clicked_list_element($elt);

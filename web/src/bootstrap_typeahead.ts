@@ -186,9 +186,13 @@ export type TypeaheadInputElement =
     | {
           $element: JQuery<HTMLInputElement>;
           type: "input";
+      }
+    | {
+          $element: JQuery<HTMLTextAreaElement>;
+          type: "textarea";
       };
 
-class Typeahead<ItemType extends string | object> {
+export class Typeahead<ItemType extends string | object> {
     input_element: TypeaheadInputElement;
     items: number;
     matcher: (item: ItemType, query: string) => boolean;
@@ -225,6 +229,7 @@ class Typeahead<ItemType extends string | object> {
     stopAdvance: boolean;
     advanceKeyCodes: number[];
     parentElement?: string;
+    values: WeakMap<HTMLElement, ItemType>;
 
     constructor(input_element: TypeaheadInputElement, options: TypeaheadOptions<ItemType>) {
         this.input_element = input_element;
@@ -238,7 +243,7 @@ class Typeahead<ItemType extends string | object> {
         this.sorter = options.sorter;
         this.highlighter_html = options.highlighter_html;
         this.updater = options.updater ?? ((items) => this.defaultUpdater(items));
-        this.$container = $(CONTAINER_HTML).appendTo(options.parentElement ?? "body");
+        this.$container = $(CONTAINER_HTML).appendTo($(options.parentElement ?? "body"));
         this.$menu = $(MENU_HTML).appendTo(this.$container);
         this.$header = $(HEADER_ELEMENT_HTML).appendTo(this.$container);
         this.source = options.source;
@@ -259,6 +264,7 @@ class Typeahead<ItemType extends string | object> {
         this.helpOnEmptyStrings = options.helpOnEmptyStrings ?? false;
         this.naturalSearch = options.naturalSearch ?? false;
         this.parentElement = options.parentElement;
+        this.values = new WeakMap();
 
         if (this.fixed) {
             this.$container.css("position", "fixed");
@@ -270,7 +276,8 @@ class Typeahead<ItemType extends string | object> {
     }
 
     select(e?: JQuery.ClickEvent | JQuery.KeyUpEvent | JQuery.KeyDownEvent): this {
-        const val = this.$menu.find(".active").data("typeahead-value");
+        const val = this.values.get(this.$menu.find(".active")[0]);
+        assert(val !== undefined);
         if (this.input_element.type === "contenteditable") {
             this.input_element.$element
                 .text(this.updater(val, this.query, this.input_element, e) ?? "")
@@ -294,7 +301,8 @@ class Typeahead<ItemType extends string | object> {
     }
 
     set_value(): void {
-        const val = this.$menu.find(".active").data("typeahead-value");
+        const val = this.values.get(this.$menu.find(".active")[0]);
+        assert(typeof val === "string");
         if (this.input_element.type === "contenteditable") {
             this.input_element.$element.text(val);
         } else {
@@ -302,7 +310,8 @@ class Typeahead<ItemType extends string | object> {
         }
     }
 
-    defaultUpdater(item: ItemType): ItemType {
+    defaultUpdater(item: ItemType): string {
+        assert(typeof item === "string");
         return item;
     }
 
@@ -407,14 +416,15 @@ class Typeahead<ItemType extends string | object> {
 
     render(final_items: ItemType[], matching_items: ItemType[]): this {
         const $items: JQuery[] = final_items.map((item) => {
-            const $i = $(ITEM_HTML).data("typeahead-value", item);
+            const $i = $(ITEM_HTML);
+            this.values.set($i[0], item);
             const item_html = this.highlighter_html(item, this.query) ?? "";
             const $item_html = $i.find("a").html(item_html);
 
             const option_label_html = this.option_label(matching_items, item);
 
             if (option_label_html) {
-                $item_html.append(option_label_html).addClass("typeahead-option-label");
+                $item_html.append($(option_label_html)).addClass("typeahead-option-label");
             }
             return $i;
         });
@@ -476,7 +486,6 @@ class Typeahead<ItemType extends string | object> {
         for (const event_ of events) {
             $(this.input_element.$element).off(event_);
         }
-        this.input_element.$element.removeData("typeahead");
     }
 
     resizeHandler(): void {
@@ -574,7 +583,7 @@ class Typeahead<ItemType extends string | object> {
 
                 this.select(e);
 
-                if (e.currentTarget.id === "stream_message_recipient_topic") {
+                if (this.input_element.$element[0].id === "stream_message_recipient_topic") {
                     assert(this.input_element.type === "input");
                     // Move the cursor to the end of the topic
                     const topic_length = this.input_element.$element.val()!.length;
@@ -606,7 +615,7 @@ class Typeahead<ItemType extends string | object> {
                 // when shift (keycode 16) + tabbing to the topic field
                 if (
                     pseudo_keycode === 16 &&
-                    e.currentTarget.id === "stream_message_recipient_topic"
+                    this.input_element.$element[0].id === "stream_message_recipient_topic"
                 ) {
                     return;
                 }
@@ -713,22 +722,10 @@ type TypeaheadOptions<ItemType> = {
     stopAdvance?: boolean;
     tabIsEnter?: boolean;
     trigger_selection?: (event: JQuery.KeyDownEvent) => boolean;
-    updater: (
+    updater?: (
         item: ItemType,
         query: string,
         input_element: TypeaheadInputElement,
         event?: JQuery.ClickEvent | JQuery.KeyUpEvent | JQuery.KeyDownEvent,
     ) => string | undefined;
 };
-
-export function create<ItemType extends string | object>(
-    input_element: TypeaheadInputElement,
-    options: TypeaheadOptions<ItemType>,
-): void {
-    input_element.$element.data("typeahead", new Typeahead(input_element, options));
-}
-
-export function lookup($element: JQuery): void {
-    const typeahead = $element.data("typeahead");
-    typeahead.lookup();
-}

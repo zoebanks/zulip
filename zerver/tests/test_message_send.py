@@ -49,12 +49,12 @@ from zerver.lib.test_helpers import (
 from zerver.lib.timestamp import datetime_to_timestamp
 from zerver.models import (
     Message,
+    NamedUserGroup,
     Realm,
     RealmDomain,
     Recipient,
     Stream,
     Subscription,
-    UserGroup,
     UserMessage,
     UserProfile,
 )
@@ -84,34 +84,40 @@ class MessagePOSTTest(ZulipTestCase):
         Sending a message to a stream to which you are subscribed is
         successful.
         """
+        recipient_type_name = ["stream", "channel"]
         self.login("hamlet")
-        result = self.client_post(
-            "/json/messages",
-            {
-                "type": "stream",
-                "to": orjson.dumps("Verona").decode(),
-                "content": "Test message",
-                "topic": "Test topic",
-            },
-        )
-        self.assert_json_success(result)
+
+        for recipient_type in recipient_type_name:
+            result = self.client_post(
+                "/json/messages",
+                {
+                    "type": recipient_type,
+                    "to": orjson.dumps("Verona").decode(),
+                    "content": "Test message",
+                    "topic": "Test topic",
+                },
+            )
+            self.assert_json_success(result)
 
     def test_api_message_to_stream_by_name(self) -> None:
         """
         Same as above, but for the API view
         """
+        recipient_type_name = ["stream", "channel"]
         user = self.example_user("hamlet")
-        result = self.api_post(
-            user,
-            "/api/v1/messages",
-            {
-                "type": "stream",
-                "to": orjson.dumps("Verona").decode(),
-                "content": "Test message",
-                "topic": "Test topic",
-            },
-        )
-        self.assert_json_success(result)
+
+        for recipient_type in recipient_type_name:
+            result = self.api_post(
+                user,
+                "/api/v1/messages",
+                {
+                    "type": recipient_type,
+                    "to": orjson.dumps("Verona").decode(),
+                    "content": "Test message",
+                    "topic": "Test topic",
+                },
+            )
+            self.assert_json_success(result)
 
     def test_message_to_stream_with_nonexistent_id(self) -> None:
         cordelia = self.example_user("cordelia")
@@ -123,18 +129,18 @@ class MessagePOSTTest(ZulipTestCase):
             bot,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": orjson.dumps([99999]).decode(),
                 "content": "Stream message by ID.",
                 "topic": "Test topic for stream ID message",
             },
         )
-        self.assert_json_error(result, "Stream with ID '99999' does not exist")
+        self.assert_json_error(result, "Channel with ID '99999' does not exist")
 
         msg = self.get_last_message()
         expected = (
             "Your bot `whatever-bot@zulip.testserver` tried to send a message to "
-            "stream ID 99999, but there is no stream with that ID."
+            "channel ID 99999, but there is no channel with that ID."
         )
         self.assertEqual(msg.content, expected)
 
@@ -154,7 +160,7 @@ class MessagePOSTTest(ZulipTestCase):
             bot,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": orjson.dumps(stream.name).decode(),
                 "content": "Stream message to an empty stream by name.",
                 "topic": "Test topic for empty stream name message",
@@ -169,7 +175,7 @@ class MessagePOSTTest(ZulipTestCase):
         msg = self.get_second_to_last_message()
         expected = (
             "Your bot `whatever-bot@zulip.testserver` tried to send a message to "
-            "stream #**Acropolis**. The stream exists but does not have any subscribers."
+            "channel #**Acropolis**. The channel exists but does not have any subscribers."
         )
         self.assertEqual(msg.content, expected)
 
@@ -189,7 +195,7 @@ class MessagePOSTTest(ZulipTestCase):
             bot,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": orjson.dumps([stream.id]).decode(),
                 "content": "Stream message to an empty stream by id.",
                 "topic": "Test topic for empty stream id message",
@@ -204,7 +210,7 @@ class MessagePOSTTest(ZulipTestCase):
         msg = self.get_second_to_last_message()
         expected = (
             "Your bot `whatever-bot@zulip.testserver` tried to send a message to "
-            "stream #**Acropolis**. The stream exists but does not have any subscribers."
+            "channel #**Acropolis**. The channel exists but does not have any subscribers."
         )
         self.assertEqual(msg.content, expected)
 
@@ -213,21 +219,25 @@ class MessagePOSTTest(ZulipTestCase):
         Sending a message to a stream (by stream ID) to which you are
         subscribed is successful.
         """
+        recipient_type_name = ["stream", "channel"]
         self.login("hamlet")
         realm = get_realm("zulip")
         stream = get_stream("Verona", realm)
-        result = self.client_post(
-            "/json/messages",
-            {
-                "type": "stream",
-                "to": orjson.dumps([stream.id]).decode(),
-                "content": "Stream message by ID.",
-                "topic": "Test topic for stream ID message",
-            },
-        )
-        self.assert_json_success(result)
-        sent_message = self.get_last_message()
-        self.assertEqual(sent_message.content, "Stream message by ID.")
+
+        for recipient_type in recipient_type_name:
+            content = f"Stream message by ID, type parameter: {recipient_type}."
+            result = self.client_post(
+                "/json/messages",
+                {
+                    "type": recipient_type,
+                    "to": orjson.dumps([stream.id]).decode(),
+                    "content": content,
+                    "topic": "Test topic for stream ID message",
+                },
+            )
+            self.assert_json_success(result)
+            sent_message = self.get_last_message()
+            self.assertEqual(sent_message.content, content)
 
     def test_sending_message_as_stream_post_policy_admins(self) -> None:
         """
@@ -258,7 +268,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             non_admin_profile,
             stream_name,
-            "Only organization administrators can send to this stream.",
+            "Only organization administrators can send to this channel.",
         )
         non_admin_owned_bot = self.create_test_bot(
             short_name="whatever2",
@@ -268,7 +278,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             non_admin_owned_bot,
             stream_name,
-            "Only organization administrators can send to this stream.",
+            "Only organization administrators can send to this channel.",
         )
 
         moderator_profile = self.example_user("shiva")
@@ -278,7 +288,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             moderator_profile,
             stream_name,
-            "Only organization administrators can send to this stream.",
+            "Only organization administrators can send to this channel.",
         )
         moderator_owned_bot = self.create_test_bot(
             short_name="whatever3",
@@ -288,7 +298,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             moderator_owned_bot,
             stream_name,
-            "Only organization administrators can send to this stream.",
+            "Only organization administrators can send to this channel.",
         )
 
         # Bots without owner (except cross realm bot) cannot send to announcement only streams
@@ -303,7 +313,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             bot_without_owner,
             stream_name,
-            "Only organization administrators can send to this stream.",
+            "Only organization administrators can send to this channel.",
         )
 
         # Cross realm bots should be allowed
@@ -316,7 +326,7 @@ class MessagePOSTTest(ZulipTestCase):
         guest_profile = self.example_user("polonius")
         # Guests cannot send to non-STREAM_POST_POLICY_EVERYONE streams
         self._send_and_verify_message(
-            guest_profile, stream_name, "Only organization administrators can send to this stream."
+            guest_profile, stream_name, "Only organization administrators can send to this channel."
         )
 
     def test_sending_message_as_stream_post_policy_moderators(self) -> None:
@@ -360,7 +370,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             non_admin_profile,
             stream_name,
-            "Only organization administrators and moderators can send to this stream.",
+            "Only organization administrators and moderators can send to this channel.",
         )
         non_admin_owned_bot = self.create_test_bot(
             short_name="whatever3",
@@ -370,7 +380,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             non_admin_owned_bot,
             stream_name,
-            "Only organization administrators and moderators can send to this stream.",
+            "Only organization administrators and moderators can send to this channel.",
         )
 
         # Bots without owner (except cross realm bot) cannot send to STREAM_POST_POLICY_MODERATORS streams.
@@ -385,7 +395,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             bot_without_owner,
             stream_name,
-            "Only organization administrators and moderators can send to this stream.",
+            "Only organization administrators and moderators can send to this channel.",
         )
 
         # System bots should be allowed
@@ -400,7 +410,7 @@ class MessagePOSTTest(ZulipTestCase):
         self._send_and_verify_message(
             guest_profile,
             stream_name,
-            "Only organization administrators and moderators can send to this stream.",
+            "Only organization administrators and moderators can send to this channel.",
         )
 
     def test_sending_message_as_stream_post_policy_restrict_new_members(self) -> None:
@@ -443,7 +453,7 @@ class MessagePOSTTest(ZulipTestCase):
         # Non admins and their owned bots can send to STREAM_POST_POLICY_RESTRICT_NEW_MEMBERS streams,
         # if the user is not a new member
         self._send_and_verify_message(
-            non_admin_profile, stream_name, "New members cannot send to this stream."
+            non_admin_profile, stream_name, "New members cannot send to this channel."
         )
         non_admin_owned_bot = self.create_test_bot(
             short_name="whatever2",
@@ -451,7 +461,7 @@ class MessagePOSTTest(ZulipTestCase):
             user_profile=non_admin_profile,
         )
         self._send_and_verify_message(
-            non_admin_owned_bot, stream_name, "New members cannot send to this stream."
+            non_admin_owned_bot, stream_name, "New members cannot send to this channel."
         )
 
         non_admin_profile.date_joined = timezone_now() - timedelta(days=11)
@@ -475,7 +485,7 @@ class MessagePOSTTest(ZulipTestCase):
             acting_user=None,
         )
         self._send_and_verify_message(
-            bot_without_owner, stream_name, "New members cannot send to this stream."
+            bot_without_owner, stream_name, "New members cannot send to this channel."
         )
 
         moderator_profile = self.example_user("shiva")
@@ -506,7 +516,7 @@ class MessagePOSTTest(ZulipTestCase):
         guest_profile = self.example_user("polonius")
         # Guests cannot send to non-STREAM_POST_POLICY_EVERYONE streams
         self._send_and_verify_message(
-            guest_profile, stream_name, "Guests cannot send to this stream."
+            guest_profile, stream_name, "Guests cannot send to this channel."
         )
 
     def test_api_message_with_default_to(self) -> None:
@@ -522,7 +532,7 @@ class MessagePOSTTest(ZulipTestCase):
             user,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "content": "Test message no to",
                 "topic": "Test topic",
             },
@@ -542,13 +552,13 @@ class MessagePOSTTest(ZulipTestCase):
         result = self.client_post(
             "/json/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": "nonexistent_stream",
                 "content": "Test message",
                 "topic": "Test topic",
             },
         )
-        self.assert_json_error(result, "Stream 'nonexistent_stream' does not exist")
+        self.assert_json_error(result, "Channel 'nonexistent_stream' does not exist")
 
     def test_message_to_nonexistent_stream_with_bad_characters(self) -> None:
         """
@@ -559,14 +569,14 @@ class MessagePOSTTest(ZulipTestCase):
         result = self.client_post(
             "/json/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": """&<"'><non-existent>""",
                 "content": "Test message",
                 "topic": "Test topic",
             },
         )
         self.assert_json_error(
-            result, "Stream '&amp;&lt;&quot;&#x27;&gt;&lt;non-existent&gt;' does not exist"
+            result, "Channel '&amp;&lt;&quot;&#x27;&gt;&lt;non-existent&gt;' does not exist"
         )
 
     def test_message_to_stream_with_automatically_change_visibility_policy(self) -> None:
@@ -585,7 +595,7 @@ class MessagePOSTTest(ZulipTestCase):
             user,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": orjson.dumps("Verona").decode(),
                 "content": "Test message",
                 "topic": "Test topic",
@@ -601,7 +611,7 @@ class MessagePOSTTest(ZulipTestCase):
             user,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": orjson.dumps("Verona").decode(),
                 "content": "Another Test message",
                 "topic": "Test topic",
@@ -882,7 +892,7 @@ class MessagePOSTTest(ZulipTestCase):
         result = self.client_post(
             "/json/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": "Verona",
                 "content": "Test message",
                 "topic": "",
@@ -897,7 +907,7 @@ class MessagePOSTTest(ZulipTestCase):
         self.login("hamlet")
         result = self.client_post(
             "/json/messages",
-            {"type": "stream", "to": "Verona", "content": "Test message"},
+            {"type": "channel", "to": "Verona", "content": "Test message"},
         )
         self.assert_json_error(result, "Missing topic")
 
@@ -910,7 +920,7 @@ class MessagePOSTTest(ZulipTestCase):
         result = self.client_post(
             "/json/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": "Verona",
                 "topic": "Test\n\rTopic",
                 "content": "Test message",
@@ -922,7 +932,7 @@ class MessagePOSTTest(ZulipTestCase):
         result = self.client_post(
             "/json/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": "Verona",
                 "topic": "Test\ufffeTopic",
                 "content": "Test message",
@@ -932,7 +942,7 @@ class MessagePOSTTest(ZulipTestCase):
 
     def test_invalid_recipient_type(self) -> None:
         """
-        Messages other than the type of "direct", "private" or "stream" are invalid.
+        Messages other than the type of "direct", "private", "channel" or "stream" are invalid.
         """
         self.login("hamlet")
         result = self.client_post(
@@ -1072,7 +1082,7 @@ class MessagePOSTTest(ZulipTestCase):
         """
         self.login("hamlet")
         post_data = {
-            "type": "stream",
+            "type": "channel",
             "to": "Verona",
             "content": "  I like null bytes \x00 in my content",
             "topic": "Test topic",
@@ -1086,7 +1096,7 @@ class MessagePOSTTest(ZulipTestCase):
         """
         self.login("hamlet")
         post_data = {
-            "type": "stream",
+            "type": "channel",
             "to": orjson.dumps("Verona").decode(),
             "content": "  I like whitespace at the end! \n\n \n",
             "topic": "Test topic",
@@ -1098,7 +1108,7 @@ class MessagePOSTTest(ZulipTestCase):
 
         # Test if it removes the new line from the beginning of the message.
         post_data = {
-            "type": "stream",
+            "type": "channel",
             "to": orjson.dumps("Verona").decode(),
             "content": "\nAvoid the new line at the beginning of the message.",
             "topic": "Test topic",
@@ -1120,7 +1130,7 @@ class MessagePOSTTest(ZulipTestCase):
         MAX_MESSAGE_LENGTH = settings.MAX_MESSAGE_LENGTH
         long_message = "A" * (MAX_MESSAGE_LENGTH + 1)
         post_data = {
-            "type": "stream",
+            "type": "channel",
             "to": orjson.dumps("Verona").decode(),
             "content": long_message,
             "topic": "Test topic",
@@ -1141,7 +1151,7 @@ class MessagePOSTTest(ZulipTestCase):
         self.login("hamlet")
         long_topic_name = "A" * (MAX_TOPIC_NAME_LENGTH + 1)
         post_data = {
-            "type": "stream",
+            "type": "channel",
             "to": orjson.dumps("Verona").decode(),
             "content": "test content",
             "topic": long_topic_name,
@@ -1157,7 +1167,7 @@ class MessagePOSTTest(ZulipTestCase):
         result = self.client_post(
             "/json/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": "Verona",
                 "content": "Test message",
                 "topic": "Test topic",
@@ -1185,7 +1195,7 @@ class MessagePOSTTest(ZulipTestCase):
             self.mit_user("starnine"),
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "sender": self.mit_email("sipbtest"),
                 "content": "Test message",
                 "client": "zephyr_mirror",
@@ -1282,7 +1292,7 @@ class MessagePOSTTest(ZulipTestCase):
             user,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "forged": "true",
                 "time": fake_timestamp,
                 "sender": "irc-user@irc.zulip.com",
@@ -1305,7 +1315,7 @@ class MessagePOSTTest(ZulipTestCase):
             user,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "forged": "yes",
                 "time": fake_timestamp,
                 "sender": "irc-user@irc.zulip.com",
@@ -1335,7 +1345,7 @@ class MessagePOSTTest(ZulipTestCase):
 
         def test_with(sender_email: str, client: str, forged: bool) -> None:
             payload = dict(
-                type="stream",
+                type="channel",
                 to=orjson.dumps(stream_name).decode(),
                 client=client,
                 topic="whatever",
@@ -1382,7 +1392,7 @@ class MessagePOSTTest(ZulipTestCase):
         self.make_stream(stream_name, invite_only=True)
 
         payload = dict(
-            type="stream",
+            type="channel",
             to=orjson.dumps(stream_name).decode(),
             topic="whatever",
             content="whatever",
@@ -1408,7 +1418,7 @@ class MessagePOSTTest(ZulipTestCase):
             notification_bot,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": orjson.dumps("notify_channel").decode(),
                 "content": "Test message",
                 "topic": "Test topic",
@@ -1429,7 +1439,7 @@ class MessagePOSTTest(ZulipTestCase):
         stream_name = "public stream"
         self.make_stream(stream_name, invite_only=False)
         payload = dict(
-            type="stream",
+            type="channel",
             to=orjson.dumps(stream_name).decode(),
             topic="whatever",
             content="whatever",
@@ -1437,7 +1447,7 @@ class MessagePOSTTest(ZulipTestCase):
 
         # Guest user can't send message to unsubscribed public streams
         result = self.api_post(sender, "/api/v1/messages", payload)
-        self.assert_json_error(result, "Not authorized to send to stream 'public stream'")
+        self.assert_json_error(result, "Not authorized to send to channel 'public stream'")
 
         self.subscribe(sender, stream_name)
         # Guest user can send message to subscribed public streams
@@ -1951,7 +1961,7 @@ class StreamMessagesTest(ZulipTestCase):
             else:
                 with self.assertRaisesRegex(
                     JsonableError,
-                    "You do not have permission to use stream wildcard mentions in this stream.",
+                    "You do not have permission to use channel wildcard mentions in this channel.",
                 ):
                     self.send_stream_message(sender, "test_stream", content)
 
@@ -2105,7 +2115,7 @@ class StreamMessagesTest(ZulipTestCase):
         leadership = check_add_user_group(othello.realm, "leadership", [othello], acting_user=None)
         support = check_add_user_group(othello.realm, "support", [othello], acting_user=None)
 
-        moderators_system_group = UserGroup.objects.get(
+        moderators_system_group = NamedUserGroup.objects.get(
             realm=iago.realm, name=SystemGroups.MODERATORS, is_system_group=True
         )
 
@@ -2176,7 +2186,7 @@ class StreamMessagesTest(ZulipTestCase):
 
         # Test system bots.
         content = "Test mentioning user group @*support*"
-        members_group = UserGroup.objects.get(
+        members_group = NamedUserGroup.objects.get(
             name=SystemGroups.MEMBERS, realm=iago.realm, is_system_group=True
         )
         support.can_mention_group = members_group
@@ -2190,7 +2200,7 @@ class StreamMessagesTest(ZulipTestCase):
         ):
             self.send_stream_message(system_bot, "test_stream", content, recipient_realm=iago.realm)
 
-        everyone_group = UserGroup.objects.get(
+        everyone_group = NamedUserGroup.objects.get(
             name=SystemGroups.EVERYONE, realm=iago.realm, is_system_group=True
         )
         support.can_mention_group = everyone_group
@@ -2211,7 +2221,7 @@ class StreamMessagesTest(ZulipTestCase):
             user,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": orjson.dumps("Verona").decode(),
                 "sender": self.mit_email("sipbtest"),
                 "client": "zephyr_mirror",
@@ -2228,7 +2238,7 @@ class StreamMessagesTest(ZulipTestCase):
             user,
             "/api/v1/messages",
             {
-                "type": "stream",
+                "type": "channel",
                 "to": "Verona",
                 "sender": self.mit_email("sipbtest"),
                 "client": "zephyr_mirror",
@@ -2418,13 +2428,13 @@ class ExtractTest(ZulipTestCase):
             123,
         )
 
-        with self.assertRaisesRegex(JsonableError, "Invalid data type for stream"):
+        with self.assertRaisesRegex(JsonableError, "Invalid data type for channel"):
             extract_stream_indicator("{}")
 
-        with self.assertRaisesRegex(JsonableError, "Invalid data type for stream"):
+        with self.assertRaisesRegex(JsonableError, "Invalid data type for channel"):
             extract_stream_indicator("[{}]")
 
-        with self.assertRaisesRegex(JsonableError, "Expected exactly one stream"):
+        with self.assertRaisesRegex(JsonableError, "Expected exactly one channel"):
             extract_stream_indicator('[1,2,"general"]')
 
     def test_extract_private_recipients_emails(self) -> None:
@@ -3043,7 +3053,7 @@ class CheckMessageTest(ZulipTestCase):
 
         new_count = message_stream_count(parent)
         self.assertEqual(new_count, old_count + 1)
-        self.assertIn("that stream does not exist.", most_recent_message(parent).content)
+        self.assertIn("that channel does not exist.", most_recent_message(parent).content)
 
         # Try sending to stream that exists with no subscribers soon
         # after; due to rate-limiting, this should send nothing.

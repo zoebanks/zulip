@@ -523,7 +523,39 @@ class TestRemoteServerSupportEndpoint(ZulipTestCase):
         iago = self.example_user("iago")
         self.login_user(iago)
 
+        # A required plan tier for a customer can be set when an upgrade
+        # is scheduled which is different than the one customer is upgrading to,
+        # but won't change either pre-existing plan tiers.
+        self.assertIsNone(customer.required_plan_tier)
+        result = self.client_post(
+            "/activity/remote/support",
+            {
+                "remote_realm_id": f"{remote_realm.id}",
+                "required_plan_tier": f"{CustomerPlan.TIER_SELF_HOSTED_BUSINESS}",
+            },
+        )
+        self.assert_in_success_response(
+            ["Required plan tier for realm-name-4 set to Zulip Business."],
+            result,
+        )
+        customer.refresh_from_db()
+        next_plan.refresh_from_db()
+        self.assertEqual(customer.required_plan_tier, CustomerPlan.TIER_SELF_HOSTED_BUSINESS)
+        self.assertEqual(plan.tier, CustomerPlan.TIER_SELF_HOSTED_LEGACY)
+        self.assertEqual(next_plan.tier, CustomerPlan.TIER_SELF_HOSTED_BASIC)
+
         # A default discount can be added when an upgrade is scheduled.
+        result = self.client_post(
+            "/activity/remote/support",
+            {
+                "remote_realm_id": f"{remote_realm.id}",
+                "required_plan_tier": f"{CustomerPlan.TIER_SELF_HOSTED_BASIC}",
+            },
+        )
+        self.assert_in_success_response(
+            ["Required plan tier for realm-name-4 set to Zulip Basic."],
+            result,
+        )
         result = self.client_post(
             "/activity/remote/support",
             {"remote_realm_id": f"{remote_realm.id}", "discount": "50"},
@@ -535,7 +567,8 @@ class TestRemoteServerSupportEndpoint(ZulipTestCase):
         plan.refresh_from_db()
         next_plan.refresh_from_db()
         self.assertEqual(customer.default_discount, Decimal(50))
-        self.assertEqual(plan.discount, Decimal(50))
+        # Discount for current plan stays None since it is not the same as required tier for discount.
+        self.assertEqual(plan.discount, None)
         self.assertEqual(next_plan.discount, Decimal(50))
         self.assertEqual(plan.tier, CustomerPlan.TIER_SELF_HOSTED_LEGACY)
         self.assertEqual(next_plan.tier, CustomerPlan.TIER_SELF_HOSTED_BASIC)
@@ -555,26 +588,6 @@ class TestRemoteServerSupportEndpoint(ZulipTestCase):
         )
         customer.refresh_from_db()
         self.assertIsNone(customer.minimum_licenses)
-
-        # A required plan tier for a customer can be set when an upgrade
-        # is scheduled, but won't change either pre-existing plan tiers.
-        self.assertIsNone(customer.required_plan_tier)
-        result = self.client_post(
-            "/activity/remote/support",
-            {
-                "remote_realm_id": f"{remote_realm.id}",
-                "required_plan_tier": f"{CustomerPlan.TIER_SELF_HOSTED_BUSINESS}",
-            },
-        )
-        self.assert_in_success_response(
-            ["Required plan tier for realm-name-4 set to Zulip Business."],
-            result,
-        )
-        customer.refresh_from_db()
-        next_plan.refresh_from_db()
-        self.assertEqual(customer.required_plan_tier, CustomerPlan.TIER_SELF_HOSTED_BUSINESS)
-        self.assertEqual(plan.tier, CustomerPlan.TIER_SELF_HOSTED_LEGACY)
-        self.assertEqual(next_plan.tier, CustomerPlan.TIER_SELF_HOSTED_BASIC)
 
     def test_support_deactivate_remote_server(self) -> None:
         iago = self.example_user("iago")
@@ -696,16 +709,17 @@ class TestSupportEndpoint(ZulipTestCase):
             stream: str, invitee_email: str, realm: Optional[Realm] = None
         ) -> None:
             invite_expires_in_minutes = 10 * 24 * 60
-            self.client_post(
-                "/json/invites",
-                {
-                    "invitee_emails": [invitee_email],
-                    "stream_ids": orjson.dumps([self.get_stream_id(stream, realm)]).decode(),
-                    "invite_expires_in_minutes": invite_expires_in_minutes,
-                    "invite_as": PreregistrationUser.INVITE_AS["MEMBER"],
-                },
-                subdomain=realm.string_id if realm is not None else "zulip",
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client_post(
+                    "/json/invites",
+                    {
+                        "invitee_emails": [invitee_email],
+                        "stream_ids": orjson.dumps([self.get_stream_id(stream, realm)]).decode(),
+                        "invite_expires_in_minutes": invite_expires_in_minutes,
+                        "invite_as": PreregistrationUser.INVITE_AS["MEMBER"],
+                    },
+                    subdomain=realm.string_id if realm is not None else "zulip",
+                )
 
         def check_hamlet_user_query_result(result: "TestHttpResponse") -> None:
             assert_user_details_in_html_response(
@@ -715,8 +729,10 @@ class TestSupportEndpoint(ZulipTestCase):
                 [
                     f"<b>Admins</b>: {self.example_email('iago')}\n",
                     f"<b>Owners</b>: {self.example_email('desdemona')}\n",
-                    'class="copy-button" data-copytext="{}">'.format(self.example_email("iago")),
-                    'class="copy-button" data-copytext="{}">'.format(
+                    'class="copy-button" data-clipboard-text="{}">'.format(
+                        self.example_email("iago")
+                    ),
+                    'class="copy-button" data-clipboard-text="{}">'.format(
                         self.example_email("desdemona")
                     ),
                 ],
@@ -1104,6 +1120,17 @@ class TestSupportEndpoint(ZulipTestCase):
         iago = self.example_user("iago")
         self.login_user(iago)
 
+        result = self.client_post(
+            "/activity/support",
+            {
+                "realm_id": f"{lear_realm.id}",
+                "required_plan_tier": f"{CustomerPlan.TIER_CLOUD_STANDARD}",
+            },
+        )
+        self.assert_in_success_response(
+            ["Required plan tier for lear set to Zulip Cloud Standard."],
+            result,
+        )
         result = self.client_post(
             "/activity/support", {"realm_id": f"{lear_realm.id}", "discount": "25"}
         )

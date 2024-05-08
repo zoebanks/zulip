@@ -84,18 +84,22 @@ function construct_copy_div($div, start_id, end_id) {
         // so we have to add new recipient's bar to final copied message
         // and wouldn't forget to add start_recipient's bar at the beginning of final message
         if (recipient_row_id !== last_recipient_row_id) {
-            $div.append(construct_recipient_header($row));
+            construct_recipient_header($row).appendTo($div);
             last_recipient_row_id = recipient_row_id;
             should_include_start_recipient_header = true;
         }
         const message = message_lists.current.get(rows.id($row));
         const $content = $(message.content);
-        $content.first().prepend(message.sender_full_name + ": ");
+        $content.first().prepend(
+            $("<span>")
+                .text(message.sender_full_name + ": ")
+                .contents(),
+        );
         $div.append($content);
     }
 
     if (should_include_start_recipient_header) {
-        $div.prepend(construct_recipient_header($start_row));
+        construct_recipient_header($start_row).prependTo($div);
     }
 }
 
@@ -415,13 +419,11 @@ export function paste_handler_converter(paste_html) {
             // We parse the copied html to then check if the generating link (which, if
             // present, always comes before the preview in the copied html) is also there.
 
-            // If the preview has an aria-label, it means it does have a named link in the
-            // message, and if the 1st element with the same image link in the copied html
+            // If the 1st element with the same image link in the copied html
             // does not have the `message_inline_image` class, it means it is the generating
             // link, and not the preview, meaning the generating link is copied as well.
             const copied_html = new DOMParser().parseFromString(paste_html, "text/html");
             if (
-                node.firstChild.hasAttribute("aria-label") &&
                 !copied_html
                     .querySelector("a[href='" + node.firstChild.getAttribute("href") + "']")
                     ?.parentNode?.classList.contains("message_inline_image")

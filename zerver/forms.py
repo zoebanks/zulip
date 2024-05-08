@@ -101,7 +101,7 @@ def check_subdomain_available(subdomain: str, allow_reserved_subdomain: bool = F
         raise ValidationError(error_strings["unavailable"])
     if subdomain[0] == "-" or subdomain[-1] == "-":
         raise ValidationError(error_strings["extremal dash"])
-    if not re.match("^[a-z0-9-]*$", subdomain):
+    if not re.match(r"^[a-z0-9-]*$", subdomain):
         raise ValidationError(error_strings["bad character"])
     if len(subdomain) < 3:
         raise ValidationError(error_strings["too short"])
@@ -180,6 +180,11 @@ class RegistrationForm(RealmDetailsForm):
     )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # Since the superclass doesn't except random extra kwargs, we
+        # remove it from the kwargs dict before initializing.
+        self.realm_creation = kwargs["realm_creation"]
+        self.realm = kwargs.pop("realm", None)
+
         super().__init__(*args, **kwargs)
         if settings.TERMS_OF_SERVICE_VERSION is not None:
             self.fields["terms"] = forms.BooleanField(required=True)
@@ -211,7 +216,9 @@ class RegistrationForm(RealmDetailsForm):
 
     def clean_full_name(self) -> str:
         try:
-            return check_full_name(self.cleaned_data["full_name"])
+            return check_full_name(
+                full_name_raw=self.cleaned_data["full_name"], user_profile=None, realm=self.realm
+            )
         except JsonableError as e:
             raise ValidationError(e.msg)
 
